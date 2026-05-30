@@ -64,6 +64,7 @@
             ninja
 
             vtsls
+            clang-tools
           ];
 
           ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
