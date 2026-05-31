@@ -1,28 +1,45 @@
 import React from 'react';
-import { SafeAreaView, Text, View } from 'react-native';
-// Import the auto-generated test function from your new C++ library
+import {
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { multiply } from 'react-native-vision-auth';
 
 function App(): React.JSX.Element {
-  // Call the C++ function synchronously
   const result = multiply(3, 7);
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: '#121212', justifyContent: 'center' }}
-    >
-      <View style={{ alignItems: 'center' }}>
-        <Text style={{ fontSize: 24, color: '#FFFFFF', marginBottom: 10 }}>
-          C++ TurboModule Status:
-        </Text>
-
-        {/* If this renders "21", the bridge is fully functional! */}
-        <Text style={{ fontSize: 48, color: '#00FF00', fontWeight: 'bold' }}>
-          3 x 7 = {result}
-        </Text>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.content}>
+        <Text style={styles.text}>VisionAuth Pure C++ Test</Text>
+        <Text style={styles.result}>3 x 7 = {result}</Text>
       </View>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#1E1E1E',
+  },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  text: {
+    fontSize: 24,
+    color: '#00FF00',
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  result: {
+    fontSize: 32,
+    color: '#FFFFFF',
+  }
+});
 
 export default App;

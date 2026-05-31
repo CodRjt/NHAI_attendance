@@ -1,113 +1,32 @@
 {
   "name": "react-native-vision-auth",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "A high-performance offline facial recognition and liveness detection module for React Native.",
-  "main": "./lib/module/index.js",
-  "types": "./lib/typescript/src/index.d.ts",
-  "exports": {
-    ".": {
-      "source": "./src/index.tsx",
-      "types": "./lib/typescript/src/index.d.ts",
-      "default": "./lib/module/index.js"
-    },
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "src",
-    "lib",
-    "android",
-    "ios",
-    "cpp",
-    "*.podspec",
-    "react-native.config.js",
-    "!ios/build",
-    "!android/build",
-    "!android/gradle",
-    "!android/gradlew",
-    "!android/gradlew.bat",
-    "!android/local.properties",
-    "!**/__tests__",
-    "!**/__fixtures__",
-    "!**/__mocks__",
-    "!**/.*"
-  ],
-  "scripts": {
-    "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
-    "prepare": "bob build",
-    "typecheck": "tsc"
-  },
-  "keywords": [
-    "react-native",
-    "ios",
-    "android"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/CodRjt/NHAI_attendance.git"
-  },
-  "author": "piyush-1337 <piyushkatkar9421@gmail.com> (https://github.com/piyush-1337)",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/CodRjt/NHAI_attendance/issues"
-  },
-  "homepage": "https://github.com/CodRjt/NHAI_attendance#readme",
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/"
-  },
-  "devDependencies": {
-    "@react-native-community/cli": "20.1.0",
-    "@react-native/babel-preset": "0.85.0",
-    "@types/react": "^19.2.0",
-    "del-cli": "^7.0.0",
-    "react": "19.2.3",
-    "react-native": "0.85.0",
-    "react-native-builder-bob": "^0.41.0",
-    "turbo": "^2.8.21",
-    "typescript": "^6.0.2"
-  },
-  "peerDependencies": {
-    "react": "*",
-    "react-native": "*"
-  },
-  "workspaces": [
-    "example"
-  ],
-  "react-native-builder-bob": {
-    "source": "src",
-    "output": "lib",
-    "targets": [
-      [
-        "module",
-        {
-          "esm": true
-        }
-      ],
-      [
-        "typescript",
-        {
-          "project": "tsconfig.build.json"
-        }
-      ],
-      "codegen"
-    ]
-  },
+  "main": "src/index",
   "codegenConfig": {
     "name": "VisionAuthSpec",
     "type": "modules",
-    "jsSrcsDir": "src",
-    "outputDir": {
-      "ios": "ios/generated",
-      "android": "android/generated"
-    },
-    "android": {
-      "javaPackageName": "com.visionauth"
-    },
-    "includesGeneratedCode": true
+    "jsSrcsDir": "src"
+  },
+  "author": "piyush-1337 <piyushkatkar9421@gmail.com> (https://github.com/piyush-1337)",
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/CodRjt/NHAI_attendance#readme",
+  "devDependencies": {
+    "@react-native/babel-preset": "0.85.0",
+    "@types/react": "^19.2.0",
+    "react": "19.2.3",
+    "react-native": "0.85.0"
   },
   "create-react-native-library": {
-    "type": "turbo-module",
-    "languages": "cpp",
-    "tools": [],
+    "type": "nitro-module",
+    "languages": "kotlin-swift",
+    "tools": [
+      "eslint",
+      "jest",
+      "lefthook",
+      "release-it",
+      "vite"
+    ],
     "version": "0.62.0"
   }
 }

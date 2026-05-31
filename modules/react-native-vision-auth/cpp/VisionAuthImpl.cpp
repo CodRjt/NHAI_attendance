@@ -1,18 +1,9 @@
-#include "VisionAuthImpl.h"
+#include "VisionAuthImpl.hpp"
 
-namespace facebook::react {
+namespace margelo::nitro::visionauth {
 
-VisionAuthImpl::VisionAuthImpl(
-  std::shared_ptr<CallInvoker> jsInvoker
-)
-  : NativeVisionAuthCxxSpec(std::move(jsInvoker)) {}
-
-double VisionAuthImpl::multiply(
-  jsi::Runtime& rt,
-  double a,
-  double b
-) {
+double VisionAuthImpl::multiply(double a, double b) {
   return a * b;
 }
 
-}
+} // namespace margelo::nitro::visionauth

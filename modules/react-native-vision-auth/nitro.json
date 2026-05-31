@@ -1,0 +1,12 @@
+{
+  "cxxNamespace": ["visionauth"],
+  "ios": {
+    "iosModuleName": "VisionAuth"
+  },
+  "android": {
+    "androidNamespace": ["visionauth"],
+    "androidCxxLibName": "visionauth"
+  },
+  "autolinking": {},
+  "ignorePaths": ["node_modules"]
+}
