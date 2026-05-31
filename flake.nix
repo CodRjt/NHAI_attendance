@@ -42,7 +42,7 @@
           ];
 
           includeNDK = true;
-          ndkVersions = [ "27.1.12297006" ];
+          ndkVersions = [ "27.1.12297006" "28.2.13676358" ];
 
           includeCmake = true;
           cmakeVersions = [ "3.22.1" ];
@@ -53,7 +53,6 @@
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            pnpm
             yarn
 
             androidSdk
@@ -69,7 +68,7 @@
           ];
 
           ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
-          ANDROID_NDK_ROOT = "${androidSdk}/libexec/android-sdk/ndk/27.0.12077973";
+          ANDROID_NDK_ROOT = "${androidSdk}/libexec/android-sdk/ndk/28.2.13676358";
           JAVA_HOME = "${pkgs.jdk17}/lib/openjdk";
 
           shellHook = ''

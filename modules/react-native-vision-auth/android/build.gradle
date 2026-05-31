@@ -40,6 +40,13 @@ apply plugin: "com.facebook.react"
 android {
   namespace "com.margelo.nitro.visionauth"
 
+  sourceSets {
+    main {
+      jniLibs.srcDirs = ['../cpp/tflite/jni']
+      assets.srcDirs = ['src/main/assets']
+    }
+  }
+
   ndkVersion getExtOrDefault("ndkVersion")
   compileSdkVersion getExtOrDefault("compileSdkVersion")
 
@@ -116,4 +123,5 @@ android {
 dependencies {
   implementation "com.facebook.react:react-android"
   implementation project(":react-native-nitro-modules")
+  implementation "org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1"
 }

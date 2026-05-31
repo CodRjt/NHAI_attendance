@@ -13,9 +13,12 @@
 #error NitroModules cannot be found! Are you sure you installed NitroModules properly?
 #endif
 
+// Forward declaration of `VisionAuthResult` to properly resolve imports.
+namespace margelo::nitro::visionauth { struct VisionAuthResult; }
 
-
-
+#include <string>
+#include "VisionAuthResult.hpp"
+#include <NitroModules/ArrayBuffer.hpp>
 
 namespace margelo::nitro::visionauth {
 
@@ -48,7 +51,8 @@ namespace margelo::nitro::visionauth {
 
     public:
       // Methods
-      virtual double multiply(double a, double b) = 0;
+      virtual bool loadModels(const std::string& blazeFacePath, const std::string& faceLandmarkerPath, const std::string& ghostFacePath) = 0;
+      virtual VisionAuthResult analyzeFrame(const std::shared_ptr<ArrayBuffer>& pixelData, double width, double height, double bytesPerRow) = 0;
 
     protected:
       // Hybrid Setup

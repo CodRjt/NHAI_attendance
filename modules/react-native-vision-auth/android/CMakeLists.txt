@@ -15,13 +15,24 @@ add_library(${PACKAGE_NAME} SHARED
 include(${CMAKE_SOURCE_DIR}/../nitrogen/generated/android/visionauth+autolinking.cmake)
 
 # Set up local includes
-include_directories("src/main/cpp" "../cpp")
+include_directories(
+  "src/main/cpp" 
+  "../cpp"
+  "../cpp/tflite/headers"
+)
 
 find_library(LOG_LIB log)
+
+# Add TFLite prebuilt library
+add_library(tensorflowlite_jni SHARED IMPORTED)
+set_target_properties(tensorflowlite_jni PROPERTIES IMPORTED_LOCATION
+    ${CMAKE_SOURCE_DIR}/../cpp/tflite/jni/${ANDROID_ABI}/libtensorflowlite_jni.so)
 
 # Link all libraries together
 target_link_libraries(
         ${PACKAGE_NAME}
         ${LOG_LIB}
         android # <-- Android core
+        tensorflowlite_jni
+        dl
 )

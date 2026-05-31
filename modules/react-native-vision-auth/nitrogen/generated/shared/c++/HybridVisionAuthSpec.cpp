@@ -14,7 +14,8 @@ namespace margelo::nitro::visionauth {
     HybridObject::loadHybridMethods();
     // load custom methods/properties
     registerHybrids(this, [](Prototype& prototype) {
-      prototype.registerHybridMethod("multiply", &HybridVisionAuthSpec::multiply);
+      prototype.registerHybridMethod("loadModels", &HybridVisionAuthSpec::loadModels);
+      prototype.registerHybridMethod("analyzeFrame", &HybridVisionAuthSpec::analyzeFrame);
     });
   }
 
