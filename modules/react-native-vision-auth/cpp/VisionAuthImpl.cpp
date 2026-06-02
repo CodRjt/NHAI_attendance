@@ -47,24 +47,29 @@ void VisionAuthImpl::resizeBilinear(const uint8_t *src, int srcW, int srcH,
                                     int cropY, int cropW, int cropH, float *dst,
                                     int dstW, int dstH, int dstChannels) {
   for (int y = 0; y < dstH; y++) {
+    float srcYf = cropY + (y + 0.5f) * cropH / dstH - 0.5f;
+    int y0 = std::max(0, std::min((int)srcYf, srcH - 1));
+    int y1 = std::max(0, std::min(y0 + 1, srcH - 1));
+    float yFrac = srcYf - y0;
+    
+    int y0_offset = y0 * bytesPerRow;
+    int y1_offset = y1 * bytesPerRow;
+
     for (int x = 0; x < dstW; x++) {
       float srcXf = cropX + (x + 0.5f) * cropW / dstW - 0.5f;
-      float srcYf = cropY + (y + 0.5f) * cropH / dstH - 0.5f;
-
       int x0 = std::max(0, std::min((int)srcXf, srcW - 1));
-      int y0 = std::max(0, std::min((int)srcYf, srcH - 1));
       int x1 = std::max(0, std::min(x0 + 1, srcW - 1));
-      int y1 = std::max(0, std::min(y0 + 1, srcH - 1));
-
       float xFrac = srcXf - x0;
-      float yFrac = srcYf - y0;
+      
+      int x0_offset = x0 * srcChannels;
+      int x1_offset = x1 * srcChannels;
 
       for (int c = 0; c < dstChannels; c++) {
         int srcC = std::min(c, srcChannels - 1);
-        float v00 = src[y0 * bytesPerRow + x0 * srcChannels + srcC];
-        float v01 = src[y0 * bytesPerRow + x1 * srcChannels + srcC];
-        float v10 = src[y1 * bytesPerRow + x0 * srcChannels + srcC];
-        float v11 = src[y1 * bytesPerRow + x1 * srcChannels + srcC];
+        float v00 = src[y0_offset + x0_offset + srcC];
+        float v01 = src[y0_offset + x1_offset + srcC];
+        float v10 = src[y1_offset + x0_offset + srcC];
+        float v11 = src[y1_offset + x1_offset + srcC];
 
         float v0 = v00 + (v01 - v00) * xFrac;
         float v1 = v10 + (v11 - v10) * xFrac;
@@ -153,6 +158,41 @@ bool VisionAuthImpl::loadModels(const std::string &blazeFacePath,
   }
 
   _modelsLoaded = true;
+
+  // Pre-compute BlazeFace anchors
+  const int NUM_ANCHORS = 896;
+  _blazeFaceAnchors.clear();
+  _blazeFaceAnchors.reserve(NUM_ANCHORS);
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 16; ++x) {
+      float cx = (x + 0.5f) * 8.0f;
+      float cy = (y + 0.5f) * 8.0f;
+      _blazeFaceAnchors.push_back({cx, cy});
+      _blazeFaceAnchors.push_back({cx, cy});
+    }
+  }
+  for (int y = 0; y < 8; ++y) {
+    for (int x = 0; x < 8; ++x) {
+      float cx = (x + 0.5f) * 16.0f;
+      float cy = (y + 0.5f) * 16.0f;
+      for (int i = 0; i < 6; ++i) {
+        _blazeFaceAnchors.push_back({cx, cy});
+      }
+    }
+  }
+
+  // Find FaceLandmarker output tensor index
+  int outCount = TfLiteInterpreterGetOutputTensorCount(_faceLandmarkerInterpreter);
+  const TfLiteTensor *landmarksTensor = TfLiteInterpreterGetOutputTensor(_faceLandmarkerInterpreter, 0);
+  _faceLandmarksOutputIndex = 0;
+  for (int i = 1; i < outCount; i++) {
+    const TfLiteTensor *t = TfLiteInterpreterGetOutputTensor(_faceLandmarkerInterpreter, i);
+    if (TfLiteTensorByteSize(t) > TfLiteTensorByteSize(landmarksTensor)) {
+      landmarksTensor = t;
+      _faceLandmarksOutputIndex = i;
+    }
+  }
+
   LOGI("All models successfully loaded!");
   return true;
 }
@@ -169,16 +209,10 @@ bool VisionAuthImpl::runBlazeFace(const uint8_t *rgbData, int width, int height,
   int INPUT_H = TfLiteTensorDim(inputTensor, 1);
   int INPUT_C = TfLiteTensorDim(inputTensor, 3);
 
-  std::vector<float> inputBuf(INPUT_W * INPUT_H * INPUT_C);
+  // Zero-copy: Write directly to the interpreter's tensor memory
+  float *inputData = (float *)TfLiteTensorData(inputTensor);
   resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
-                 cropW, cropH, inputBuf.data(), INPUT_W, INPUT_H, INPUT_C);
-
-  if (TfLiteTensorCopyFromBuffer(inputTensor, inputBuf.data(),
-                                 inputBuf.size() * sizeof(float)) !=
-      kTfLiteOk) {
-    LOGE("BlazeFace: TfLiteTensorCopyFromBuffer failed!");
-    return false;
-  }
+                 cropW, cropH, inputData, INPUT_W, INPUT_H, INPUT_C);
 
   if (TfLiteInterpreterInvoke(_blazeFaceInterpreter) != kTfLiteOk) {
     LOGE("BlazeFace inference failed");
@@ -209,37 +243,14 @@ bool VisionAuthImpl::runBlazeFace(const uint8_t *rgbData, int width, int height,
     return false;
   }
 
-  // Generate anchors exactly as MediaPipe SSD Anchor Calculator for BlazeFace
-  std::vector<std::pair<float, float>> anchors;
-  anchors.reserve(NUM_ANCHORS);
-  // Layer 1: 16x16 grid, stride 8, 2 anchors per cell
-  for (int y = 0; y < 16; ++y) {
-    for (int x = 0; x < 16; ++x) {
-      float cx = (x + 0.5f) * 8.0f;
-      float cy = (y + 0.5f) * 8.0f;
-      anchors.push_back({cx, cy});
-      anchors.push_back({cx, cy});
-    }
-  }
-  // Layer 2: 8x8 grid, stride 16, 6 anchors per cell
-  for (int y = 0; y < 8; ++y) {
-    for (int x = 0; x < 8; ++x) {
-      float cx = (x + 0.5f) * 16.0f;
-      float cy = (y + 0.5f) * 16.0f;
-      for (int i = 0; i < 6; ++i) {
-        anchors.push_back({cx, cy});
-      }
-    }
-  }
-
   const float *box = regressors + bestIdx * 16;
   float dx = box[0];
   float dy = box[1];
   float w = box[2];
   float h = box[3];
 
-  float anchorX = anchors[bestIdx].first;
-  float anchorY = anchors[bestIdx].second;
+  float anchorX = _blazeFaceAnchors[bestIdx].first;
+  float anchorY = _blazeFaceAnchors[bestIdx].second;
 
   float centerX = dx + anchorX;
   float centerY = dy + anchorY;
@@ -292,34 +303,18 @@ bool VisionAuthImpl::runFaceLandmarker(const uint8_t *rgbData, int width,
   int INPUT_H = TfLiteTensorDim(inputTensor, 1);
   int INPUT_C = TfLiteTensorDim(inputTensor, 3);
 
-  std::vector<float> inputBuf(INPUT_W * INPUT_H * INPUT_C);
+  // Zero-copy: Write directly to the interpreter's tensor memory
+  float *inputData = (float *)TfLiteTensorData(inputTensor);
   resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
-                 cropW, cropH, inputBuf.data(), INPUT_W, INPUT_H, INPUT_C);
-
-  if (TfLiteTensorCopyFromBuffer(inputTensor, inputBuf.data(),
-                                 inputBuf.size() * sizeof(float)) !=
-      kTfLiteOk) {
-    LOGE("FaceLandmarker: TfLiteTensorCopyFromBuffer failed! Check model input "
-         "size.");
-    return false;
-  }
+                 cropW, cropH, inputData, INPUT_W, INPUT_H, INPUT_C);
 
   if (TfLiteInterpreterInvoke(_faceLandmarkerInterpreter) != kTfLiteOk) {
     LOGE("Face Landmarker inference failed");
     return false;
   }
 
-  int outCount =
-      TfLiteInterpreterGetOutputTensorCount(_faceLandmarkerInterpreter);
   const TfLiteTensor *landmarksTensor =
-      TfLiteInterpreterGetOutputTensor(_faceLandmarkerInterpreter, 0);
-  for (int i = 1; i < outCount; i++) {
-    const TfLiteTensor *t =
-        TfLiteInterpreterGetOutputTensor(_faceLandmarkerInterpreter, i);
-    if (TfLiteTensorByteSize(t) > TfLiteTensorByteSize(landmarksTensor)) {
-      landmarksTensor = t;
-    }
-  }
+      TfLiteInterpreterGetOutputTensor(_faceLandmarkerInterpreter, _faceLandmarksOutputIndex);
 
   const float *landmarks = (const float *)TfLiteTensorData(landmarksTensor);
 
@@ -376,16 +371,10 @@ bool VisionAuthImpl::runGhostFace(const uint8_t *rgbData, int width, int height,
   int INPUT_H = TfLiteTensorDim(inputTensor, 1);
   int INPUT_C = TfLiteTensorDim(inputTensor, 3);
 
-  std::vector<float> inputBuf(INPUT_W * INPUT_H * INPUT_C);
+  // Zero-copy: Write directly to the interpreter's tensor memory
+  float *inputData = (float *)TfLiteTensorData(inputTensor);
   resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
-                 cropW, cropH, inputBuf.data(), INPUT_W, INPUT_H, INPUT_C);
-
-  if (TfLiteTensorCopyFromBuffer(inputTensor, inputBuf.data(),
-                                 inputBuf.size() * sizeof(float)) !=
-      kTfLiteOk) {
-    LOGE("GhostFace: TfLiteTensorCopyFromBuffer failed!");
-    return false;
-  }
+                 cropW, cropH, inputData, INPUT_W, INPUT_H, INPUT_C);
 
   if (TfLiteInterpreterInvoke(_ghostFaceInterpreter) != kTfLiteOk) {
     LOGE("GhostFace inference failed");
@@ -421,7 +410,12 @@ VisionAuthImpl::analyzeFrame(const std::shared_ptr<ArrayBuffer> &pixelData,
   // We rotate the entire image into a perfect upright 720x1280 buffer!
   int w = rawH; // 720
   int h = rawW; // 1280
-  std::vector<uint8_t> uprightImage(w * h * srcChannels);
+  
+  size_t requiredSize = w * h * srcChannels;
+  if (_uprightBuffer.size() < requiredSize) {
+    _uprightBuffer.resize(requiredSize);
+  }
+  
   const uint8_t *rawData = pixelData->data();
 
   for (int y = 0; y < h; y++) {
@@ -433,12 +427,12 @@ VisionAuthImpl::analyzeFrame(const std::shared_ptr<ArrayBuffer> &pixelData,
       int dstIdx = (y * w + x) * srcChannels;
       int srcIdx = rawY * bpr + rawX * srcChannels;
       for (int c = 0; c < srcChannels; c++) {
-        uprightImage[dstIdx + c] = rawData[srcIdx + c];
+        _uprightBuffer[dstIdx + c] = rawData[srcIdx + c];
       }
     }
   }
 
-  const uint8_t *data = uprightImage.data();
+  const uint8_t *data = _uprightBuffer.data();
   // We now pass the 'w' (720) and 'h' (1280) and standard bytes per row to the
   // models!
   int uprightBpr = w * srcChannels;

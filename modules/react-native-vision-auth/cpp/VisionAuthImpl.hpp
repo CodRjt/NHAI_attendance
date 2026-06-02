@@ -39,6 +39,10 @@ private:
   int _openFrameCount = 0;
   int _blinkCooldownFrames = 0;
 
+  std::vector<uint8_t> _uprightBuffer;
+  std::vector<std::pair<float, float>> _blazeFaceAnchors;
+  int _faceLandmarksOutputIndex = -1;
+
   // Internal helpers
   bool runBlazeFace(const uint8_t *rgbData, int width, int height,
                     int bytesPerRow, int srcChannels, int cropX, int cropY,
