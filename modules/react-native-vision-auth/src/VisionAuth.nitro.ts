@@ -4,9 +4,12 @@ export interface VisionAuthResult {
   faceDetected: boolean;
   faceScore?: number;
   faceBox?: number[]; // [x, y, w, h]
+  leftEyeBox?: number[]; // [x, y, w, h]
+  rightEyeBox?: number[]; // [x, y, w, h]
   leftEAR?: number;
   rightEAR?: number;
   avgEAR?: number;
+  baseline?: number;
   eyesClosed?: boolean;
   embeddingOk?: boolean;
   embedding?: number[];

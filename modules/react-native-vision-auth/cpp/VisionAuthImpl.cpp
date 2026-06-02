@@ -1,29 +1,37 @@
 #include "VisionAuthImpl.hpp"
+#include <algorithm>
 #include <android/log.h>
 #include <cmath>
 #include <cstring>
-#include <algorithm>
 #include <dlfcn.h>
 #include <fbjni/fbjni.h>
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "VisionAuth", __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "VisionAuth", __VA_ARGS__)
+#define LOGI(...)                                                              \
+  __android_log_print(ANDROID_LOG_INFO, "VisionAuth", __VA_ARGS__)
+#define LOGE(...)                                                              \
+  __android_log_print(ANDROID_LOG_ERROR, "VisionAuth", __VA_ARGS__)
 
 namespace margelo::nitro::visionauth {
 
 VisionAuthImpl::VisionAuthImpl() : HybridObject(TAG), HybridVisionAuthSpec() {}
 
 VisionAuthImpl::~VisionAuthImpl() {
-  if (_blazeFaceInterpreter) TfLiteInterpreterDelete(_blazeFaceInterpreter);
-  if (_faceLandmarkerInterpreter) TfLiteInterpreterDelete(_faceLandmarkerInterpreter);
-  if (_ghostFaceInterpreter) TfLiteInterpreterDelete(_ghostFaceInterpreter);
+  if (_blazeFaceInterpreter)
+    TfLiteInterpreterDelete(_blazeFaceInterpreter);
+  if (_faceLandmarkerInterpreter)
+    TfLiteInterpreterDelete(_faceLandmarkerInterpreter);
+  if (_ghostFaceInterpreter)
+    TfLiteInterpreterDelete(_ghostFaceInterpreter);
 
-  if (_blazeFaceModel) TfLiteModelDelete(_blazeFaceModel);
-  if (_faceLandmarkerModel) TfLiteModelDelete(_faceLandmarkerModel);
-  if (_ghostFaceModel) TfLiteModelDelete(_ghostFaceModel);
+  if (_blazeFaceModel)
+    TfLiteModelDelete(_blazeFaceModel);
+  if (_faceLandmarkerModel)
+    TfLiteModelDelete(_faceLandmarkerModel);
+  if (_ghostFaceModel)
+    TfLiteModelDelete(_ghostFaceModel);
 
   if (_flexDelegate && _deleteFlexDelegate) {
-    JNIEnv* env = facebook::jni::Environment::current();
+    JNIEnv *env = facebook::jni::Environment::current();
     if (env) {
       _deleteFlexDelegate(env, nullptr, reinterpret_cast<jlong>(_flexDelegate));
     }
@@ -34,11 +42,10 @@ VisionAuthImpl::~VisionAuthImpl() {
   }
 }
 
-void VisionAuthImpl::resizeBilinear(
-  const uint8_t* src, int srcW, int srcH, int bytesPerRow, int srcChannels,
-  int cropX, int cropY, int cropW, int cropH,
-  float* dst, int dstW, int dstH, int dstChannels
-) {
+void VisionAuthImpl::resizeBilinear(const uint8_t *src, int srcW, int srcH,
+                                    int bytesPerRow, int srcChannels, int cropX,
+                                    int cropY, int cropW, int cropH, float *dst,
+                                    int dstW, int dstH, int dstChannels) {
   for (int y = 0; y < dstH; y++) {
     for (int x = 0; x < dstW; x++) {
       float srcXf = cropX + (x + 0.5f) * cropW / dstW - 0.5f;
@@ -70,38 +77,51 @@ void VisionAuthImpl::resizeBilinear(
   }
 }
 
-bool VisionAuthImpl::loadModels(
-  const std::string& blazeFacePath,
-  const std::string& faceLandmarkerPath,
-  const std::string& ghostFacePath
-) {
+bool VisionAuthImpl::loadModels(const std::string &blazeFacePath,
+                                const std::string &faceLandmarkerPath,
+                                const std::string &ghostFacePath) {
   LOGI("Loading BlazeFace model from %s", blazeFacePath.c_str());
   _blazeFaceModel = TfLiteModelCreateFromFile(blazeFacePath.c_str());
-  if (!_blazeFaceModel) { LOGE("Failed to load BlazeFace"); return false; }
+  if (!_blazeFaceModel) {
+    LOGE("Failed to load BlazeFace");
+    return false;
+  }
 
   LOGI("Loading Face Landmarks model from %s", faceLandmarkerPath.c_str());
   _faceLandmarkerModel = TfLiteModelCreateFromFile(faceLandmarkerPath.c_str());
-  if (!_faceLandmarkerModel) { LOGE("Failed to load Face Landmarker"); return false; }
+  if (!_faceLandmarkerModel) {
+    LOGE("Failed to load Face Landmarker");
+    return false;
+  }
 
   LOGI("Loading GhostFace model from %s", ghostFacePath.c_str());
   _ghostFaceModel = TfLiteModelCreateFromFile(ghostFacePath.c_str());
-  if (!_ghostFaceModel) { LOGE("Failed to load GhostFace"); return false; }
+  if (!_ghostFaceModel) {
+    LOGE("Failed to load GhostFace");
+    return false;
+  }
 
-  TfLiteInterpreterOptions* options = TfLiteInterpreterOptionsCreate();
+  TfLiteInterpreterOptions *options = TfLiteInterpreterOptionsCreate();
   TfLiteInterpreterOptionsSetNumThreads(options, 2);
 
   // GhostFace relies on Select TF Ops, so we dynamically load the Flex Delegate
-  _flexLibraryHandle = dlopen("libtensorflowlite_flex_jni.so", RTLD_NOW | RTLD_GLOBAL);
+  _flexLibraryHandle =
+      dlopen("libtensorflowlite_flex_jni.so", RTLD_NOW | RTLD_GLOBAL);
   if (_flexLibraryHandle) {
-    using CreateFlexDelegate = jlong (*)(JNIEnv*, jclass, jobjectArray, jobjectArray);
-    auto createFlexDelegate = reinterpret_cast<CreateFlexDelegate>(
-      dlsym(_flexLibraryHandle, "Java_org_tensorflow_lite_flex_FlexDelegate_nativeCreateDelegate"));
-    _deleteFlexDelegate = reinterpret_cast<void (*)(JNIEnv*, jclass, jlong)>(
-      dlsym(_flexLibraryHandle, "Java_org_tensorflow_lite_flex_FlexDelegate_nativeDeleteDelegate"));
+    using CreateFlexDelegate =
+        jlong (*)(JNIEnv *, jclass, jobjectArray, jobjectArray);
+    auto createFlexDelegate = reinterpret_cast<CreateFlexDelegate>(dlsym(
+        _flexLibraryHandle,
+        "Java_org_tensorflow_lite_flex_FlexDelegate_nativeCreateDelegate"));
+    _deleteFlexDelegate =
+        reinterpret_cast<void (*)(JNIEnv *, jclass, jlong)>(dlsym(
+            _flexLibraryHandle,
+            "Java_org_tensorflow_lite_flex_FlexDelegate_nativeDeleteDelegate"));
 
-    JNIEnv* env = facebook::jni::Environment::current();
+    JNIEnv *env = facebook::jni::Environment::current();
     if (env && createFlexDelegate) {
-      _flexDelegate = reinterpret_cast<TfLiteDelegate*>(createFlexDelegate(env, nullptr, nullptr, nullptr));
+      _flexDelegate = reinterpret_cast<TfLiteDelegate *>(
+          createFlexDelegate(env, nullptr, nullptr, nullptr));
       if (_flexDelegate) {
         TfLiteInterpreterOptionsAddDelegate(options, _flexDelegate);
         LOGI("TensorFlow Lite Flex delegate enabled");
@@ -112,18 +132,21 @@ bool VisionAuthImpl::loadModels(
   }
 
   _blazeFaceInterpreter = TfLiteInterpreterCreate(_blazeFaceModel, options);
-  _faceLandmarkerInterpreter = TfLiteInterpreterCreate(_faceLandmarkerModel, options);
+  _faceLandmarkerInterpreter =
+      TfLiteInterpreterCreate(_faceLandmarkerModel, options);
   _ghostFaceInterpreter = TfLiteInterpreterCreate(_ghostFaceModel, options);
 
   TfLiteInterpreterOptionsDelete(options);
 
-  if (!_blazeFaceInterpreter || !_faceLandmarkerInterpreter || !_ghostFaceInterpreter) {
+  if (!_blazeFaceInterpreter || !_faceLandmarkerInterpreter ||
+      !_ghostFaceInterpreter) {
     LOGE("Failed to create TFLite Interpreters");
     return false;
   }
 
   if (TfLiteInterpreterAllocateTensors(_blazeFaceInterpreter) != kTfLiteOk ||
-      TfLiteInterpreterAllocateTensors(_faceLandmarkerInterpreter) != kTfLiteOk ||
+      TfLiteInterpreterAllocateTensors(_faceLandmarkerInterpreter) !=
+          kTfLiteOk ||
       TfLiteInterpreterAllocateTensors(_ghostFaceInterpreter) != kTfLiteOk) {
     LOGE("Failed to allocate tensors");
     return false;
@@ -134,21 +157,25 @@ bool VisionAuthImpl::loadModels(
   return true;
 }
 
-bool VisionAuthImpl::runBlazeFace(
-  const uint8_t* rgbData, int width, int height, int bytesPerRow, int srcChannels,
-  float& outX, float& outY, float& outW, float& outH, float& outScore
-) {
+bool VisionAuthImpl::runBlazeFace(const uint8_t *rgbData, int width, int height,
+                                  int bytesPerRow, int srcChannels, int cropX,
+                                  int cropY, int cropW, int cropH, float &outX,
+                                  float &outY, float &outW, float &outH,
+                                  float &outScore) {
   const int NUM_ANCHORS = 896;
-  TfLiteTensor* inputTensor = TfLiteInterpreterGetInputTensor(_blazeFaceInterpreter, 0);
+  TfLiteTensor *inputTensor =
+      TfLiteInterpreterGetInputTensor(_blazeFaceInterpreter, 0);
   int INPUT_W = TfLiteTensorDim(inputTensor, 2);
   int INPUT_H = TfLiteTensorDim(inputTensor, 1);
   int INPUT_C = TfLiteTensorDim(inputTensor, 3);
 
   std::vector<float> inputBuf(INPUT_W * INPUT_H * INPUT_C);
-  resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, 0, 0, width, height,
-                 inputBuf.data(), INPUT_W, INPUT_H, INPUT_C);
+  resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
+                 cropW, cropH, inputBuf.data(), INPUT_W, INPUT_H, INPUT_C);
 
-  if (TfLiteTensorCopyFromBuffer(inputTensor, inputBuf.data(), inputBuf.size() * sizeof(float)) != kTfLiteOk) {
+  if (TfLiteTensorCopyFromBuffer(inputTensor, inputBuf.data(),
+                                 inputBuf.size() * sizeof(float)) !=
+      kTfLiteOk) {
     LOGE("BlazeFace: TfLiteTensorCopyFromBuffer failed!");
     return false;
   }
@@ -158,11 +185,13 @@ bool VisionAuthImpl::runBlazeFace(
     return false;
   }
 
-  const TfLiteTensor* regressorTensor = TfLiteInterpreterGetOutputTensor(_blazeFaceInterpreter, 0);
-  const TfLiteTensor* classifierTensor = TfLiteInterpreterGetOutputTensor(_blazeFaceInterpreter, 1);
+  const TfLiteTensor *regressorTensor =
+      TfLiteInterpreterGetOutputTensor(_blazeFaceInterpreter, 0);
+  const TfLiteTensor *classifierTensor =
+      TfLiteInterpreterGetOutputTensor(_blazeFaceInterpreter, 1);
 
-  const float* regressors = (const float*)TfLiteTensorData(regressorTensor);
-  const float* classifiers = (const float*)TfLiteTensorData(classifierTensor);
+  const float *regressors = (const float *)TfLiteTensorData(regressorTensor);
+  const float *classifiers = (const float *)TfLiteTensorData(classifierTensor);
 
   float bestScore = -1.0f;
   int bestIdx = -1;
@@ -203,11 +232,11 @@ bool VisionAuthImpl::runBlazeFace(
     }
   }
 
-  const float* box = regressors + bestIdx * 16;
+  const float *box = regressors + bestIdx * 16;
   float dx = box[0];
   float dy = box[1];
-  float w  = box[2];
-  float h  = box[3];
+  float w = box[2];
+  float h = box[3];
 
   float anchorX = anchors[bestIdx].first;
   float anchorY = anchors[bestIdx].second;
@@ -216,22 +245,14 @@ bool VisionAuthImpl::runBlazeFace(
   float centerY = dy + anchorY;
 
   // Convert normalized [0, INPUT_W] coordinates back to original pixel scale
-  outX = (centerX / INPUT_W) * width;
-  outY = (centerY / INPUT_H) * height;
-  outW = (w / INPUT_W) * width;
-  outH = (h / INPUT_H) * height;
+  outX = (centerX / INPUT_W) * cropW + cropX;
+  outY = (centerY / INPUT_H) * cropH + cropY;
+  outW = (w / INPUT_W) * cropW;
+  outH = (h / INPUT_H) * cropH;
 
   // Convert center coordinates to top-left
   outX = outX - outW / 2.0f;
   outY = outY - outH / 2.0f;
-
-  // Add 20% padding to the bounding box so FaceLandmarker gets the whole head!
-  float padW = outW * 0.20f;
-  float padH = outH * 0.20f;
-  outX -= padW / 2.0f;
-  outY -= padH / 2.0f;
-  outW += padW;
-  outH += padH;
 
   outX = std::max(0.0f, outX);
   outY = std::max(0.0f, outY);
@@ -242,7 +263,7 @@ bool VisionAuthImpl::runBlazeFace(
   return true;
 }
 
-static float computeEAR(const float* landmarks, const int* eyeIndices) {
+static float computeEAR(const float *landmarks, const int *eyeIndices) {
   auto dist = [&](int a, int b) -> float {
     float dx = landmarks[a * 3 + 0] - landmarks[b * 3 + 0];
     float dy = landmarks[a * 3 + 1] - landmarks[b * 3 + 1];
@@ -253,26 +274,33 @@ static float computeEAR(const float* landmarks, const int* eyeIndices) {
   float vertical2 = dist(eyeIndices[2], eyeIndices[4]);
   float horizontal = dist(eyeIndices[0], eyeIndices[3]);
 
-  if (horizontal < 1e-6f) return 0.0f;
+  if (horizontal < 1e-6f)
+    return 0.0f;
   return (vertical1 + vertical2) / (2.0f * horizontal);
 }
 
-bool VisionAuthImpl::runFaceLandmarker(
-  const uint8_t* rgbData, int width, int height, int bytesPerRow, int srcChannels,
-  int cropX, int cropY, int cropW, int cropH,
-  float& leftEAR, float& rightEAR
-) {
-  TfLiteTensor* inputTensor = TfLiteInterpreterGetInputTensor(_faceLandmarkerInterpreter, 0);
+bool VisionAuthImpl::runFaceLandmarker(const uint8_t *rgbData, int width,
+                                       int height, int bytesPerRow,
+                                       int srcChannels, int cropX, int cropY,
+                                       int cropW, int cropH, float &leftEAR,
+                                       float &rightEAR,
+                                       std::vector<double> &leftEyeBoxOut,
+                                       std::vector<double> &rightEyeBoxOut) {
+  TfLiteTensor *inputTensor =
+      TfLiteInterpreterGetInputTensor(_faceLandmarkerInterpreter, 0);
   int INPUT_W = TfLiteTensorDim(inputTensor, 2);
   int INPUT_H = TfLiteTensorDim(inputTensor, 1);
   int INPUT_C = TfLiteTensorDim(inputTensor, 3);
 
   std::vector<float> inputBuf(INPUT_W * INPUT_H * INPUT_C);
-  resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY, cropW, cropH,
-                 inputBuf.data(), INPUT_W, INPUT_H, INPUT_C);
+  resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
+                 cropW, cropH, inputBuf.data(), INPUT_W, INPUT_H, INPUT_C);
 
-  if (TfLiteTensorCopyFromBuffer(inputTensor, inputBuf.data(), inputBuf.size() * sizeof(float)) != kTfLiteOk) {
-    LOGE("FaceLandmarker: TfLiteTensorCopyFromBuffer failed! Check model input size.");
+  if (TfLiteTensorCopyFromBuffer(inputTensor, inputBuf.data(),
+                                 inputBuf.size() * sizeof(float)) !=
+      kTfLiteOk) {
+    LOGE("FaceLandmarker: TfLiteTensorCopyFromBuffer failed! Check model input "
+         "size.");
     return false;
   }
 
@@ -281,43 +309,80 @@ bool VisionAuthImpl::runFaceLandmarker(
     return false;
   }
 
-  // The model may have multiple outputs (e.g., face score and landmarks). 
-  // We want the landmarks tensor, which is the largest one (1404 floats).
-  int outCount = TfLiteInterpreterGetOutputTensorCount(_faceLandmarkerInterpreter);
-  const TfLiteTensor* landmarksTensor = TfLiteInterpreterGetOutputTensor(_faceLandmarkerInterpreter, 0);
+  int outCount =
+      TfLiteInterpreterGetOutputTensorCount(_faceLandmarkerInterpreter);
+  const TfLiteTensor *landmarksTensor =
+      TfLiteInterpreterGetOutputTensor(_faceLandmarkerInterpreter, 0);
   for (int i = 1; i < outCount; i++) {
-    const TfLiteTensor* t = TfLiteInterpreterGetOutputTensor(_faceLandmarkerInterpreter, i);
+    const TfLiteTensor *t =
+        TfLiteInterpreterGetOutputTensor(_faceLandmarkerInterpreter, i);
     if (TfLiteTensorByteSize(t) > TfLiteTensorByteSize(landmarksTensor)) {
       landmarksTensor = t;
     }
   }
 
-  const float* landmarks = (const float*)TfLiteTensorData(landmarksTensor);
+  const float *landmarks = (const float *)TfLiteTensorData(landmarksTensor);
 
-  static const int leftEyeIdx[6]  = {33, 160, 158, 133, 153, 144};
+  static const int leftEyeIdx[6] = {33, 160, 158, 133, 153, 144};
   static const int rightEyeIdx[6] = {362, 385, 387, 263, 373, 380};
 
   leftEAR = computeEAR(landmarks, leftEyeIdx);
   rightEAR = computeEAR(landmarks, rightEyeIdx);
 
+  auto getEyeBox = [&](const int *indices, std::vector<double> &outBox) {
+    float minX = 1e9f, maxX = -1e9f;
+    float minY = 1e9f, maxY = -1e9f;
+    for (int i = 0; i < 6; i++) {
+      float lx = landmarks[indices[i] * 3 + 0];
+      float ly = landmarks[indices[i] * 3 + 1];
+      minX = std::min(minX, lx);
+      maxX = std::max(maxX, lx);
+      minY = std::min(minY, ly);
+      maxY = std::max(maxY, ly);
+    }
+    float scaleX = (maxX > 2.0f) ? INPUT_W : 1.0f;
+    float scaleY = (maxY > 2.0f) ? INPUT_H : 1.0f;
+
+    float absMinX = cropX + (minX / scaleX) * cropW;
+    float absMaxX = cropX + (maxX / scaleX) * cropW;
+    float absMinY = cropY + (minY / scaleY) * cropH;
+    float absMaxY = cropY + (maxY / scaleY) * cropH;
+
+    // Add a tiny bit of padding to the eye box for better visualization
+    float ew = absMaxX - absMinX;
+    float eh = absMaxY - absMinY;
+    absMinX -= ew * 0.2f;
+    absMaxX += ew * 0.2f;
+    absMinY -= eh * 0.2f;
+    absMaxY += eh * 0.2f;
+
+    outBox = {(double)absMinX, (double)absMinY, (double)(absMaxX - absMinX),
+              (double)(absMaxY - absMinY)};
+  };
+
+  getEyeBox(leftEyeIdx, leftEyeBoxOut);
+  getEyeBox(rightEyeIdx, rightEyeBoxOut);
+
   return true;
 }
 
-bool VisionAuthImpl::runGhostFace(
-  const uint8_t* rgbData, int width, int height, int bytesPerRow, int srcChannels,
-  int cropX, int cropY, int cropW, int cropH,
-  std::vector<double>& embedding
-) {
-  TfLiteTensor* inputTensor = TfLiteInterpreterGetInputTensor(_ghostFaceInterpreter, 0);
+bool VisionAuthImpl::runGhostFace(const uint8_t *rgbData, int width, int height,
+                                  int bytesPerRow, int srcChannels, int cropX,
+                                  int cropY, int cropW, int cropH,
+                                  std::vector<double> &embedding) {
+  TfLiteTensor *inputTensor =
+      TfLiteInterpreterGetInputTensor(_ghostFaceInterpreter, 0);
   int INPUT_W = TfLiteTensorDim(inputTensor, 2);
   int INPUT_H = TfLiteTensorDim(inputTensor, 1);
   int INPUT_C = TfLiteTensorDim(inputTensor, 3);
 
   std::vector<float> inputBuf(INPUT_W * INPUT_H * INPUT_C);
-  resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY, cropW, cropH,
-                 inputBuf.data(), INPUT_W, INPUT_H, INPUT_C);
+  resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
+                 cropW, cropH, inputBuf.data(), INPUT_W, INPUT_H, INPUT_C);
 
-  if (TfLiteTensorCopyFromBuffer(inputTensor, inputBuf.data(), inputBuf.size() * sizeof(float)) != kTfLiteOk) {
+  if (TfLiteTensorCopyFromBuffer(inputTensor, inputBuf.data(),
+                                 inputBuf.size() * sizeof(float)) !=
+      kTfLiteOk) {
     LOGE("GhostFace: TfLiteTensorCopyFromBuffer failed!");
     return false;
   }
@@ -328,19 +393,17 @@ bool VisionAuthImpl::runGhostFace(
   }
 
   const int EMBEDDING_SIZE = 512;
-  const TfLiteTensor* outputTensor = TfLiteInterpreterGetOutputTensor(_ghostFaceInterpreter, 0);
-  const float* outputData = (const float*)TfLiteTensorData(outputTensor);
+  const TfLiteTensor *outputTensor =
+      TfLiteInterpreterGetOutputTensor(_ghostFaceInterpreter, 0);
+  const float *outputData = (const float *)TfLiteTensorData(outputTensor);
 
   embedding.assign(outputData, outputData + EMBEDDING_SIZE);
   return true;
 }
 
-VisionAuthResult VisionAuthImpl::analyzeFrame(
-  const std::shared_ptr<ArrayBuffer>& pixelData,
-  double width,
-  double height,
-  double bytesPerRow
-) {
+VisionAuthResult
+VisionAuthImpl::analyzeFrame(const std::shared_ptr<ArrayBuffer> &pixelData,
+                             double width, double height, double bytesPerRow) {
   VisionAuthResult result;
 
   if (!_modelsLoaded || !pixelData) {
@@ -348,76 +411,196 @@ VisionAuthResult VisionAuthImpl::analyzeFrame(
     return result;
   }
 
-  int w = static_cast<int>(width);
-  int h = static_cast<int>(height);
+  int rawW = static_cast<int>(width);
+  int rawH = static_cast<int>(height);
   int bpr = static_cast<int>(bytesPerRow);
-  int srcChannels = (bpr >= w * 4) ? 4 : 3;
-  
-  static int frameCount = 0;
-  if (frameCount++ % 10 == 0) {
-    LOGI("analyzeFrame: w=%d, h=%d, bpr=%d, computedChannels=%d", w, h, bpr, srcChannels);
+  int srcChannels = (bpr >= rawW * 4) ? 4 : 3;
+
+  // The raw Vision Camera buffer on Android is typically landscape (1280x720).
+  // In portrait mode, the front camera is rotated 270 degrees and mirrored.
+  // We rotate the entire image into a perfect upright 720x1280 buffer!
+  int w = rawH; // 720
+  int h = rawW; // 1280
+  std::vector<uint8_t> uprightImage(w * h * srcChannels);
+  const uint8_t *rawData = pixelData->data();
+
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      // 90 degrees counter-clockwise rotation (sensor is rotated 90 deg
+      // clockwise in portrait)
+      int rawX = h - 1 - y;
+      int rawY = x;
+      int dstIdx = (y * w + x) * srcChannels;
+      int srcIdx = rawY * bpr + rawX * srcChannels;
+      for (int c = 0; c < srcChannels; c++) {
+        uprightImage[dstIdx + c] = rawData[srcIdx + c];
+      }
+    }
   }
 
-  const uint8_t* data = pixelData->data();
+  const uint8_t *data = uprightImage.data();
+  // We now pass the 'w' (720) and 'h' (1280) and standard bytes per row to the
+  // models!
+  int uprightBpr = w * srcChannels;
+
+  static int frameCount = 0;
+  if (frameCount++ % 10 == 0) {
+    LOGI("analyzeFrame: rawW=%d, rawH=%d -> rotated to upright w=%d, h=%d",
+         rawW, rawH, w, h);
+  }
 
   // 1. Detect Face (BlazeFace)
+  // We feed a perfectly square, aspect-ratio preserving crop (letterboxed) to
+  // BlazeFace For a 720x1280 image, maxDim is 1280. cropX = (720-1280)/2 =
+  // -280. resizeBilinear will automatically clamp the out-of-bounds pixels to
+  // the edge, preserving aspect ratio!
+  int maxDim = std::max(w, h);
+  int bfCropX = (w - maxDim) / 2;
+  int bfCropY = (h - maxDim) / 2;
+
   float faceX, faceY, faceW, faceH, faceScore;
-  bool faceDetected = runBlazeFace(data, w, h, bpr, srcChannels, faceX, faceY, faceW, faceH, faceScore);
+  bool faceDetected =
+      runBlazeFace(data, w, h, uprightBpr, srcChannels, bfCropX, bfCropY,
+                   maxDim, maxDim, faceX, faceY, faceW, faceH, faceScore);
 
   if (!faceDetected) {
     // Only log occasionally to prevent log spam
     static int missCount = 0;
-    if (missCount++ % 10 == 0) LOGI("No face detected");
+    if (missCount++ % 10 == 0)
+      LOGI("No face detected");
+    _blinkClosedSeen = false;
+    _closedFrameCount = 0;
+    _openFrameCount = 0;
     result.faceDetected = false;
     return result;
   }
 
-  LOGI("Face detected! Score: %.2f | Box: x=%.1f, y=%.1f, w=%.1f, h=%.1f", faceScore, faceX, faceY, faceW, faceH);
+  LOGI("Face detected! Score: %.2f | Box: x=%.1f, y=%.1f, w=%.1f, h=%.1f",
+       faceScore, faceX, faceY, faceW, faceH);
 
   result.faceDetected = true;
   result.faceScore = faceScore;
+  // UI gets the raw, tight bounding box directly from BlazeFace (no padding)
   result.faceBox = std::vector<double>{
-    static_cast<double>(faceX),
-    static_cast<double>(faceY),
-    static_cast<double>(faceW),
-    static_cast<double>(faceH)
-  };
+      static_cast<double>(faceX), static_cast<double>(faceY),
+      static_cast<double>(faceW), static_cast<double>(faceH)};
 
-  int cropX = static_cast<int>(faceX);
-  int cropY = static_cast<int>(faceY);
-  int cropW = static_cast<int>(faceW);
-  int cropH = static_cast<int>(faceH);
+  // Face Landmarker needs a perfectly square crop, padded by 25% (as per
+  // MediaPipe docs)
+  float centerX = faceX + faceW / 2.0f;
+  float centerY = faceY + faceH / 2.0f;
+  float squareSide = std::max(faceW, faceH) * 1.25f;
+
+  int cropX = static_cast<int>(centerX - squareSide / 2.0f);
+  int cropY = static_cast<int>(centerY - squareSide / 2.0f);
+  int cropW = static_cast<int>(squareSide);
+  int cropH = static_cast<int>(squareSide);
 
   // 2. Liveness Detection (Blink / EAR)
   float leftEAR = 0.0f, rightEAR = 0.0f;
-  bool landmarksOk = runFaceLandmarker(data, w, h, bpr, srcChannels, cropX, cropY, cropW, cropH, leftEAR, rightEAR);
-  
-  bool eyesClosed = false;
+  std::vector<double> leftEyeBox, rightEyeBox;
+  bool landmarksOk = runFaceLandmarker(data, w, h, uprightBpr, srcChannels,
+                                       cropX, cropY, cropW, cropH, leftEAR,
+                                       rightEAR, leftEyeBox, rightEyeBox);
+
+  bool eyesCurrentlyClosed = false;
+  bool blinkDetected = false;
 
   if (landmarksOk) {
     float avgEAR = (leftEAR + rightEAR) / 2.0f;
-    LOGI("Landmarks OK! leftEAR: %.3f | rightEAR: %.3f | avgEAR: %.3f", leftEAR, rightEAR, avgEAR);
-    
+
     result.leftEAR = leftEAR;
     result.rightEAR = rightEAR;
     result.avgEAR = avgEAR;
-    // Standard Eye Aspect Ratio (EAR) threshold for a blink is < 0.21.
-    // Now that the camera runs at 60 FPS, it will easily capture the eye fully shut!
-    eyesClosed = (avgEAR < 0.21f);
-    result.eyesClosed = eyesClosed;
+    result.baseline = _earOpenBaseline;
+    result.leftEyeBox = leftEyeBox;
+    result.rightEyeBox = rightEyeBox;
+
+    if (std::isfinite(leftEAR) && std::isfinite(rightEAR) && leftEAR > 0.02f &&
+        leftEAR < 1.0f && rightEAR > 0.02f && rightEAR < 1.0f) {
+      if (_earOpenBaseline <= 0.0f) {
+        _earOpenBaseline = avgEAR;
+      }
+      if (_leftEarOpenBaseline <= 0.0f) {
+        _leftEarOpenBaseline = leftEAR;
+      }
+      if (_rightEarOpenBaseline <= 0.0f) {
+        _rightEarOpenBaseline = rightEAR;
+      }
+
+      const float leftCloseThreshold =
+          std::max(0.10f, _leftEarOpenBaseline * 0.75f);
+      const float rightCloseThreshold =
+          std::max(0.10f, _rightEarOpenBaseline * 0.75f);
+      const float leftOpenThreshold =
+          std::max(leftCloseThreshold + 0.02f, _leftEarOpenBaseline * 0.85f);
+      const float rightOpenThreshold =
+          std::max(rightCloseThreshold + 0.02f, _rightEarOpenBaseline * 0.85f);
+
+      // Use OR instead of AND. Often one eye's landmarks track poorly during a
+      // fast blink. If either eye drops below 75% of its open baseline, we
+      // count it as a blink/wink.
+      eyesCurrentlyClosed =
+          leftEAR < leftCloseThreshold || rightEAR < rightCloseThreshold;
+      const bool eyesCurrentlyOpen =
+          leftEAR > leftOpenThreshold && rightEAR > rightOpenThreshold;
+
+      if (!eyesCurrentlyClosed && eyesCurrentlyOpen && !_blinkClosedSeen) {
+        _earOpenBaseline = (_earOpenBaseline * 0.98f) + (avgEAR * 0.02f);
+        _leftEarOpenBaseline =
+            (_leftEarOpenBaseline * 0.98f) + (leftEAR * 0.02f);
+        _rightEarOpenBaseline =
+            (_rightEarOpenBaseline * 0.98f) + (rightEAR * 0.02f);
+      }
+
+      if (_blinkCooldownFrames > 0) {
+        _blinkCooldownFrames--;
+      }
+
+      if (eyesCurrentlyClosed) {
+        _closedFrameCount++;
+        _openFrameCount = 0;
+        if (_closedFrameCount >= 2) {
+          _blinkClosedSeen = true;
+        }
+      } else if (eyesCurrentlyOpen) {
+        _openFrameCount++;
+        if (_blinkClosedSeen && _openFrameCount >= 1 &&
+            _blinkCooldownFrames == 0) {
+          blinkDetected = true;
+          _blinkCooldownFrames = 8;
+        }
+        _blinkClosedSeen = false;
+        _closedFrameCount = 0;
+      }
+
+      LOGI("Landmarks OK! leftEAR: %.3f | rightEAR: %.3f | avgEAR: %.3f | "
+           "baseline: %.3f | L<%.3f R<%.3f | L>%.3f R>%.3f | closedFrames=%d | "
+           "closed=%d | blink=%d",
+           leftEAR, rightEAR, avgEAR, _earOpenBaseline, leftCloseThreshold,
+           rightCloseThreshold, leftOpenThreshold, rightOpenThreshold,
+           _closedFrameCount, eyesCurrentlyClosed, blinkDetected);
+    } else {
+      LOGE("Invalid EAR values: leftEAR=%.3f rightEAR=%.3f avgEAR=%.3f",
+           leftEAR, rightEAR, avgEAR);
+    }
+
+    result.eyesClosed = blinkDetected;
   } else {
     LOGE("Face Landmarker failed to run or found no landmarks");
   }
 
   // 3. Facial Recognition (GhostFace)
   static int ghostFaceCounter = 0;
-  bool runGhostFaceModel = (!eyesClosed) && (ghostFaceCounter++ % 5 == 0);
+  bool runGhostFaceModel =
+      (!eyesCurrentlyClosed) && (ghostFaceCounter++ % 5 == 0);
 
   std::vector<double> embedding;
   bool embeddingOk = false;
-  
+
   if (runGhostFaceModel) {
-    embeddingOk = runGhostFace(data, w, h, bpr, srcChannels, cropX, cropY, cropW, cropH, embedding);
+    embeddingOk = runGhostFace(data, w, h, uprightBpr, srcChannels, cropX,
+                               cropY, cropW, cropH, embedding);
   }
 
   if (embeddingOk) {
