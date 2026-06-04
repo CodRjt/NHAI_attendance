@@ -13,8 +13,17 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => min_ios_version_supported }
   s.source       = { :git => "https://github.com/CodRjt/NHAI_attendance.git", :tag => "#{s.version}" }
 
-  s.source_files = "ios/**/*.{h,m,mm}", "cpp/**/*.{hpp,cpp,c,h}", "ios/generated/*.{h,cpp,mm}"
-  s.private_header_files = "ios/**/*.h"
+  s.source_files = [
+    "ios/**/*.{swift}",
+    "ios/**/*.{m,mm}",
+    "cpp/**/*.{hpp,cpp}",
+  ]
+
+  s.dependency 'React-jsi'
+  s.dependency 'React-callinvoker'
+
+  load 'nitrogen/generated/ios/VisionAuth+autolinking.rb'
+  add_nitrogen_files(s)
 
   install_modules_dependencies(s)
 end

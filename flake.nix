@@ -42,7 +42,7 @@
           ];
 
           includeNDK = true;
-          ndkVersions = [ "28.2.13676358" ];
+          ndkVersions = [ "27.1.12297006" "28.2.13676358" ];
 
           includeCmake = true;
           cmakeVersions = [ "3.22.1" ];
@@ -53,7 +53,7 @@
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            pnpm
+            yarn
 
             androidSdk
             jdk17
@@ -64,6 +64,7 @@
             ninja
 
             vtsls
+            clang-tools
           ];
 
           ANDROID_HOME = "${androidSdk}/libexec/android-sdk";

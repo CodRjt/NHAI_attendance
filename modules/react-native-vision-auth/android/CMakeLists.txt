@@ -1,27 +1,38 @@
-cmake_minimum_required(VERSION 3.4.1)
-project(VisionAuth)
+project(visionauth)
+cmake_minimum_required(VERSION 3.9.0)
 
-set (CMAKE_VERBOSE_MAKEFILE ON)
+set(PACKAGE_NAME visionauth)
+set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_CXX_STANDARD 20)
 
-add_library(
-    react-native-vision-auth    STATIC
-    ../cpp/VisionAuthImpl.cpp
+# Define C++ library and add all sources
+add_library(${PACKAGE_NAME} SHARED
+  src/main/cpp/cpp-adapter.cpp
+  ../cpp/VisionAuthImpl.cpp
 )
 
-set_target_properties(
-    react-native-vision-auth PROPERTIES
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
+# Add Nitrogen specs :)
+include(${CMAKE_SOURCE_DIR}/../nitrogen/generated/android/visionauth+autolinking.cmake)
+
+# Set up local includes
+include_directories(
+  "src/main/cpp" 
+  "../cpp"
+  "../cpp/tflite/headers"
 )
 
-target_include_directories(
-    react-native-vision-auth    PUBLIC
-    ../cpp
-)
+find_library(LOG_LIB log)
 
+# Add TFLite prebuilt library
+add_library(tensorflowlite_jni SHARED IMPORTED)
+set_target_properties(tensorflowlite_jni PROPERTIES IMPORTED_LOCATION
+    ${CMAKE_SOURCE_DIR}/../cpp/tflite/jni/${ANDROID_ABI}/libtensorflowlite_jni.so)
+
+# Link all libraries together
 target_link_libraries(
-    react-native-vision-auth    jsi
-    reactnative
-    react_codegen_VisionAuthSpec
+        ${PACKAGE_NAME}
+        ${LOG_LIB}
+        android # <-- Android core
+        tensorflowlite_jni
+        dl
 )

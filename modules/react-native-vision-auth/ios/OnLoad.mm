@@ -1,20 +1,17 @@
 #import <Foundation/Foundation.h>
-#import "VisionAuthImpl.h"
-#import <ReactCommon/CxxTurboModuleUtils.h>
+#import <NitroModules/HybridObjectRegistry.hpp>
+#import "VisionAuthImpl.hpp"
 
 @interface VisionAuthOnLoad : NSObject
 @end
 
 @implementation VisionAuthOnLoad
 
-using namespace facebook::react;
-
-+ (void)load
-{
-  registerCxxModuleToGlobalModuleMap(
-    std::string(VisionAuthImpl::kModuleName),
-    [](std::shared_ptr<CallInvoker> jsInvoker) {
-      return std::make_shared<VisionAuthImpl>(jsInvoker);
++ (void)load {
+  margelo::nitro::HybridObjectRegistry::registerHybridObjectConstructor(
+    "VisionAuth",
+    []() -> std::shared_ptr<margelo::nitro::HybridObject> {
+      return std::make_shared<margelo::nitro::visionauth::VisionAuthImpl>();
     }
   );
 }
