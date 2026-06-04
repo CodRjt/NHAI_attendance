@@ -51,7 +51,7 @@ namespace margelo::nitro::visionauth {
 
     public:
       // Methods
-      virtual bool loadModels(const std::string& blazeFacePath, const std::string& faceLandmarkerPath, const std::string& ghostFacePath) = 0;
+      virtual bool loadModels(const std::string& blazeFacePath, const std::string& faceLandmarkerPath, const std::string& ghostFacePath, const std::string& antiSpoofingPath) = 0;
       virtual VisionAuthResult analyzeFrame(const std::shared_ptr<ArrayBuffer>& pixelData, double width, double height, double bytesPerRow) = 0;
 
     protected:

@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 
-#include <jni.h>
 #include <tensorflow/lite/c/c_api.h>
 
 namespace margelo::nitro::visionauth {
@@ -15,17 +14,14 @@ private:
   // Models
   TfLiteModel *_blazeFaceModel = nullptr;
   TfLiteModel *_faceLandmarkerModel = nullptr;
-  TfLiteModel *_ghostFaceModel = nullptr;
+  TfLiteModel *_faceRecognitionModel = nullptr;
+  TfLiteModel *_antiSpoofingModel = nullptr;
 
   // Interpreters
   TfLiteInterpreter *_blazeFaceInterpreter = nullptr;
   TfLiteInterpreter *_faceLandmarkerInterpreter = nullptr;
-  TfLiteInterpreter *_ghostFaceInterpreter = nullptr;
-
-  // Flex Delegate handling
-  TfLiteDelegate *_flexDelegate = nullptr;
-  void *_flexLibraryHandle = nullptr;
-  void (*_deleteFlexDelegate)(JNIEnv *, jclass, jlong) = nullptr;
+  TfLiteInterpreter *_faceRecognitionInterpreter = nullptr;
+  TfLiteInterpreter *_antiSpoofingInterpreter = nullptr;
 
   bool _modelsLoaded = false;
 
@@ -55,14 +51,19 @@ private:
                          std::vector<double> &leftEyeBoxOut,
                          std::vector<double> &rightEyeBoxOut);
 
-  bool runGhostFace(const uint8_t *rgbData, int width, int height,
-                    int bytesPerRow, int srcChannels, int cropX, int cropY,
-                    int cropW, int cropH, std::vector<double> &embedding);
+  bool runFaceRecognition(const uint8_t *rgbData, int width, int height,
+                          int bytesPerRow, int srcChannels, int cropX,
+                          int cropY, int cropW, int cropH,
+                          std::vector<double> &embedding);
+
+  bool runAntiSpoofing(const uint8_t *rgbData, int width, int height,
+                       int bytesPerRow, int srcChannels, int cropX, int cropY,
+                       int cropW, int cropH, float &livenessScore);
 
   void resizeBilinear(const uint8_t *src, int srcW, int srcH, int bytesPerRow,
                       int srcChannels, int cropX, int cropY, int cropW,
                       int cropH, float *dst, int dstW, int dstH,
-                      int dstChannels);
+                      int dstChannels, int normMode = 1);
 
 public:
   VisionAuthImpl();
@@ -70,7 +71,8 @@ public:
 
   bool loadModels(const std::string &blazeFacePath,
                   const std::string &faceLandmarkerPath,
-                  const std::string &ghostFacePath) override;
+                  const std::string &ghostFacePath,
+                  const std::string &antiSpoofingPath) override;
   VisionAuthResult analyzeFrame(const std::shared_ptr<ArrayBuffer> &pixelData,
                                 double width, double height,
                                 double bytesPerRow) override;

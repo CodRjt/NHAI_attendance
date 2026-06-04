@@ -11,12 +11,13 @@ export interface VisionAuthResult {
   avgEAR?: number;
   baseline?: number;
   eyesClosed?: boolean;
+  livenessScore?: number;
   embeddingOk?: boolean;
   embedding?: number[];
 }
 
 export interface VisionAuth extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
-  loadModels(blazeFacePath: string, faceLandmarkerPath: string, ghostFacePath: string): boolean;
+  loadModels(blazeFacePath: string, faceLandmarkerPath: string, ghostFacePath: string, antiSpoofingPath: string): boolean;
   analyzeFrame(pixelData: ArrayBuffer, width: number, height: number, bytesPerRow: number): VisionAuthResult;
 }
 

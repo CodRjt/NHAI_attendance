@@ -50,12 +50,13 @@ namespace margelo::nitro::visionauth {
     std::optional<double> avgEAR     SWIFT_PRIVATE;
     std::optional<double> baseline     SWIFT_PRIVATE;
     std::optional<bool> eyesClosed     SWIFT_PRIVATE;
+    std::optional<double> livenessScore     SWIFT_PRIVATE;
     std::optional<bool> embeddingOk     SWIFT_PRIVATE;
     std::optional<std::vector<double>> embedding     SWIFT_PRIVATE;
 
   public:
     VisionAuthResult() = default;
-    explicit VisionAuthResult(bool faceDetected, std::optional<double> faceScore, std::optional<std::vector<double>> faceBox, std::optional<std::vector<double>> leftEyeBox, std::optional<std::vector<double>> rightEyeBox, std::optional<double> leftEAR, std::optional<double> rightEAR, std::optional<double> avgEAR, std::optional<double> baseline, std::optional<bool> eyesClosed, std::optional<bool> embeddingOk, std::optional<std::vector<double>> embedding): faceDetected(faceDetected), faceScore(faceScore), faceBox(faceBox), leftEyeBox(leftEyeBox), rightEyeBox(rightEyeBox), leftEAR(leftEAR), rightEAR(rightEAR), avgEAR(avgEAR), baseline(baseline), eyesClosed(eyesClosed), embeddingOk(embeddingOk), embedding(embedding) {}
+    explicit VisionAuthResult(bool faceDetected, std::optional<double> faceScore, std::optional<std::vector<double>> faceBox, std::optional<std::vector<double>> leftEyeBox, std::optional<std::vector<double>> rightEyeBox, std::optional<double> leftEAR, std::optional<double> rightEAR, std::optional<double> avgEAR, std::optional<double> baseline, std::optional<bool> eyesClosed, std::optional<double> livenessScore, std::optional<bool> embeddingOk, std::optional<std::vector<double>> embedding): faceDetected(faceDetected), faceScore(faceScore), faceBox(faceBox), leftEyeBox(leftEyeBox), rightEyeBox(rightEyeBox), leftEAR(leftEAR), rightEAR(rightEAR), avgEAR(avgEAR), baseline(baseline), eyesClosed(eyesClosed), livenessScore(livenessScore), embeddingOk(embeddingOk), embedding(embedding) {}
 
   public:
     friend bool operator==(const VisionAuthResult& lhs, const VisionAuthResult& rhs) = default;
@@ -81,6 +82,7 @@ namespace margelo::nitro {
         JSIConverter<std::optional<double>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "avgEAR"))),
         JSIConverter<std::optional<double>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "baseline"))),
         JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "eyesClosed"))),
+        JSIConverter<std::optional<double>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "livenessScore"))),
         JSIConverter<std::optional<bool>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "embeddingOk"))),
         JSIConverter<std::optional<std::vector<double>>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "embedding")))
       );
@@ -97,6 +99,7 @@ namespace margelo::nitro {
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "avgEAR"), JSIConverter<std::optional<double>>::toJSI(runtime, arg.avgEAR));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "baseline"), JSIConverter<std::optional<double>>::toJSI(runtime, arg.baseline));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "eyesClosed"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.eyesClosed));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "livenessScore"), JSIConverter<std::optional<double>>::toJSI(runtime, arg.livenessScore));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "embeddingOk"), JSIConverter<std::optional<bool>>::toJSI(runtime, arg.embeddingOk));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "embedding"), JSIConverter<std::optional<std::vector<double>>>::toJSI(runtime, arg.embedding));
       return obj;
@@ -119,6 +122,7 @@ namespace margelo::nitro {
       if (!JSIConverter<std::optional<double>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "avgEAR")))) return false;
       if (!JSIConverter<std::optional<double>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "baseline")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "eyesClosed")))) return false;
+      if (!JSIConverter<std::optional<double>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "livenessScore")))) return false;
       if (!JSIConverter<std::optional<bool>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "embeddingOk")))) return false;
       if (!JSIConverter<std::optional<std::vector<double>>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "embedding")))) return false;
       return true;

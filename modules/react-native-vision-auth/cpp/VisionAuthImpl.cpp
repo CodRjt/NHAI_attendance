@@ -3,8 +3,6 @@
 #include <android/log.h>
 #include <cmath>
 #include <cstring>
-#include <dlfcn.h>
-#include <fbjni/fbjni.h>
 
 #define LOGI(...)                                                              \
   __android_log_print(ANDROID_LOG_INFO, "VisionAuth", __VA_ARGS__)
@@ -20,32 +18,24 @@ VisionAuthImpl::~VisionAuthImpl() {
     TfLiteInterpreterDelete(_blazeFaceInterpreter);
   if (_faceLandmarkerInterpreter)
     TfLiteInterpreterDelete(_faceLandmarkerInterpreter);
-  if (_ghostFaceInterpreter)
-    TfLiteInterpreterDelete(_ghostFaceInterpreter);
+  if (_faceRecognitionInterpreter)
+    TfLiteInterpreterDelete(_faceRecognitionInterpreter);
+  if (_antiSpoofingInterpreter)
+    TfLiteInterpreterDelete(_antiSpoofingInterpreter);
 
   if (_blazeFaceModel)
     TfLiteModelDelete(_blazeFaceModel);
   if (_faceLandmarkerModel)
     TfLiteModelDelete(_faceLandmarkerModel);
-  if (_ghostFaceModel)
-    TfLiteModelDelete(_ghostFaceModel);
-
-  if (_flexDelegate && _deleteFlexDelegate) {
-    JNIEnv *env = facebook::jni::Environment::current();
-    if (env) {
-      _deleteFlexDelegate(env, nullptr, reinterpret_cast<jlong>(_flexDelegate));
-    }
-  }
-
-  if (_flexLibraryHandle) {
-    dlclose(_flexLibraryHandle);
-  }
+  if (_faceRecognitionModel)
+    TfLiteModelDelete(_faceRecognitionModel);
 }
 
 void VisionAuthImpl::resizeBilinear(const uint8_t *src, int srcW, int srcH,
                                     int bytesPerRow, int srcChannels, int cropX,
                                     int cropY, int cropW, int cropH, float *dst,
-                                    int dstW, int dstH, int dstChannels) {
+                                    int dstW, int dstH, int dstChannels,
+                                    int normMode) {
   for (int y = 0; y < dstH; y++) {
     float srcYf = cropY + (y + 0.5f) * cropH / dstH - 0.5f;
     int y0 = std::max(0, std::min((int)srcYf, srcH - 1));
@@ -75,8 +65,16 @@ void VisionAuthImpl::resizeBilinear(const uint8_t *src, int srcW, int srcH,
         float v1 = v10 + (v11 - v10) * xFrac;
         float val = v0 + (v1 - v0) * yFrac;
 
-        // Normalize to [-1.0, 1.0] for TFLite
-        dst[(y * dstW + x) * dstChannels + c] = val / 127.5f - 1.0f;
+        // normMode 0: raw [0, 255]
+        // normMode 1: [-1.0, 1.0] (BlazeFace / FaceLandmarker)
+        // normMode 2: [0.0, 1.0] (Student QAT INT8)
+        if (normMode == 0) {
+          dst[(y * dstW + x) * dstChannels + c] = val;
+        } else if (normMode == 2) {
+          dst[(y * dstW + x) * dstChannels + c] = val / 255.0f;
+        } else {
+          dst[(y * dstW + x) * dstChannels + c] = val / 127.5f - 1.0f;
+        }
       }
     }
   }
@@ -84,7 +82,8 @@ void VisionAuthImpl::resizeBilinear(const uint8_t *src, int srcW, int srcH,
 
 bool VisionAuthImpl::loadModels(const std::string &blazeFacePath,
                                 const std::string &faceLandmarkerPath,
-                                const std::string &ghostFacePath) {
+                                const std::string &ghostFacePath,
+                                const std::string &antiSpoofingPath) {
   LOGI("Loading BlazeFace model from %s", blazeFacePath.c_str());
   _blazeFaceModel = TfLiteModelCreateFromFile(blazeFacePath.c_str());
   if (!_blazeFaceModel) {
@@ -99,52 +98,36 @@ bool VisionAuthImpl::loadModels(const std::string &blazeFacePath,
     return false;
   }
 
-  LOGI("Loading GhostFace model from %s", ghostFacePath.c_str());
-  _ghostFaceModel = TfLiteModelCreateFromFile(ghostFacePath.c_str());
-  if (!_ghostFaceModel) {
-    LOGE("Failed to load GhostFace");
+  LOGI("Loading Face Recognition model from %s", ghostFacePath.c_str());
+  _faceRecognitionModel = TfLiteModelCreateFromFile(ghostFacePath.c_str());
+  if (!_faceRecognitionModel) {
+    LOGE("Failed to load Face Recognition model");
+    return false;
+  }
+
+  LOGI("Loading Anti-Spoofing model from %s", antiSpoofingPath.c_str());
+  _antiSpoofingModel = TfLiteModelCreateFromFile(antiSpoofingPath.c_str());
+  if (!_antiSpoofingModel) {
+    LOGE("Failed to load Anti-Spoofing model");
     return false;
   }
 
   TfLiteInterpreterOptions *options = TfLiteInterpreterOptionsCreate();
   TfLiteInterpreterOptionsSetNumThreads(options, 2);
 
-  // GhostFace relies on Select TF Ops, so we dynamically load the Flex Delegate
-  _flexLibraryHandle =
-      dlopen("libtensorflowlite_flex_jni.so", RTLD_NOW | RTLD_GLOBAL);
-  if (_flexLibraryHandle) {
-    using CreateFlexDelegate =
-        jlong (*)(JNIEnv *, jclass, jobjectArray, jobjectArray);
-    auto createFlexDelegate = reinterpret_cast<CreateFlexDelegate>(dlsym(
-        _flexLibraryHandle,
-        "Java_org_tensorflow_lite_flex_FlexDelegate_nativeCreateDelegate"));
-    _deleteFlexDelegate =
-        reinterpret_cast<void (*)(JNIEnv *, jclass, jlong)>(dlsym(
-            _flexLibraryHandle,
-            "Java_org_tensorflow_lite_flex_FlexDelegate_nativeDeleteDelegate"));
-
-    JNIEnv *env = facebook::jni::Environment::current();
-    if (env && createFlexDelegate) {
-      _flexDelegate = reinterpret_cast<TfLiteDelegate *>(
-          createFlexDelegate(env, nullptr, nullptr, nullptr));
-      if (_flexDelegate) {
-        TfLiteInterpreterOptionsAddDelegate(options, _flexDelegate);
-        LOGI("TensorFlow Lite Flex delegate enabled");
-      }
-    }
-  } else {
-    LOGE("Failed to load libtensorflowlite_flex_jni.so: %s", dlerror());
-  }
-
+  // Student QAT INT8 model uses standard TFLite ops only — no Flex Delegate needed
   _blazeFaceInterpreter = TfLiteInterpreterCreate(_blazeFaceModel, options);
   _faceLandmarkerInterpreter =
       TfLiteInterpreterCreate(_faceLandmarkerModel, options);
-  _ghostFaceInterpreter = TfLiteInterpreterCreate(_ghostFaceModel, options);
+  _faceRecognitionInterpreter =
+      TfLiteInterpreterCreate(_faceRecognitionModel, options);
+  _antiSpoofingInterpreter =
+      TfLiteInterpreterCreate(_antiSpoofingModel, options);
 
   TfLiteInterpreterOptionsDelete(options);
 
   if (!_blazeFaceInterpreter || !_faceLandmarkerInterpreter ||
-      !_ghostFaceInterpreter) {
+      !_faceRecognitionInterpreter || !_antiSpoofingInterpreter) {
     LOGE("Failed to create TFLite Interpreters");
     return false;
   }
@@ -152,7 +135,9 @@ bool VisionAuthImpl::loadModels(const std::string &blazeFacePath,
   if (TfLiteInterpreterAllocateTensors(_blazeFaceInterpreter) != kTfLiteOk ||
       TfLiteInterpreterAllocateTensors(_faceLandmarkerInterpreter) !=
           kTfLiteOk ||
-      TfLiteInterpreterAllocateTensors(_ghostFaceInterpreter) != kTfLiteOk) {
+      TfLiteInterpreterAllocateTensors(_faceRecognitionInterpreter) !=
+          kTfLiteOk ||
+      TfLiteInterpreterAllocateTensors(_antiSpoofingInterpreter) != kTfLiteOk) {
     LOGE("Failed to allocate tensors");
     return false;
   }
@@ -212,7 +197,7 @@ bool VisionAuthImpl::runBlazeFace(const uint8_t *rgbData, int width, int height,
   // Zero-copy: Write directly to the interpreter's tensor memory
   float *inputData = (float *)TfLiteTensorData(inputTensor);
   resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
-                 cropW, cropH, inputData, INPUT_W, INPUT_H, INPUT_C);
+                 cropW, cropH, inputData, INPUT_W, INPUT_H, INPUT_C, 1);
 
   if (TfLiteInterpreterInvoke(_blazeFaceInterpreter) != kTfLiteOk) {
     LOGE("BlazeFace inference failed");
@@ -306,7 +291,7 @@ bool VisionAuthImpl::runFaceLandmarker(const uint8_t *rgbData, int width,
   // Zero-copy: Write directly to the interpreter's tensor memory
   float *inputData = (float *)TfLiteTensorData(inputTensor);
   resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
-                 cropW, cropH, inputData, INPUT_W, INPUT_H, INPUT_C);
+                 cropW, cropH, inputData, INPUT_W, INPUT_H, INPUT_C, 1);
 
   if (TfLiteInterpreterInvoke(_faceLandmarkerInterpreter) != kTfLiteOk) {
     LOGE("Face Landmarker inference failed");
@@ -361,32 +346,94 @@ bool VisionAuthImpl::runFaceLandmarker(const uint8_t *rgbData, int width,
   return true;
 }
 
-bool VisionAuthImpl::runGhostFace(const uint8_t *rgbData, int width, int height,
-                                  int bytesPerRow, int srcChannels, int cropX,
-                                  int cropY, int cropW, int cropH,
-                                  std::vector<double> &embedding) {
+bool VisionAuthImpl::runFaceRecognition(const uint8_t *rgbData, int width,
+                                        int height, int bytesPerRow,
+                                        int srcChannels, int cropX, int cropY,
+                                        int cropW, int cropH,
+                                        std::vector<double> &embedding) {
   TfLiteTensor *inputTensor =
-      TfLiteInterpreterGetInputTensor(_ghostFaceInterpreter, 0);
+      TfLiteInterpreterGetInputTensor(_faceRecognitionInterpreter, 0);
   int INPUT_W = TfLiteTensorDim(inputTensor, 2);
   int INPUT_H = TfLiteTensorDim(inputTensor, 1);
   int INPUT_C = TfLiteTensorDim(inputTensor, 3);
 
   // Zero-copy: Write directly to the interpreter's tensor memory
   float *inputData = (float *)TfLiteTensorData(inputTensor);
+  // Student QAT INT8 model expects [0.0, 1.0] normalization (pixel / 255.0)
   resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
-                 cropW, cropH, inputData, INPUT_W, INPUT_H, INPUT_C);
+                 cropW, cropH, inputData, INPUT_W, INPUT_H, INPUT_C, 2);
 
-  if (TfLiteInterpreterInvoke(_ghostFaceInterpreter) != kTfLiteOk) {
-    LOGE("GhostFace inference failed");
+  if (TfLiteInterpreterInvoke(_faceRecognitionInterpreter) != kTfLiteOk) {
+    LOGE("Face Recognition inference failed");
     return false;
   }
 
-  const int EMBEDDING_SIZE = 512;
   const TfLiteTensor *outputTensor =
-      TfLiteInterpreterGetOutputTensor(_ghostFaceInterpreter, 0);
+      TfLiteInterpreterGetOutputTensor(_faceRecognitionInterpreter, 0);
   const float *outputData = (const float *)TfLiteTensorData(outputTensor);
+  // Read embedding size dynamically from the model output tensor
+  const int embeddingSize = TfLiteTensorDim(outputTensor, 1);
 
-  embedding.assign(outputData, outputData + EMBEDDING_SIZE);
+  // L2-normalize the embedding (required for cosine similarity)
+  float norm = 0.0f;
+  for (int i = 0; i < embeddingSize; i++) {
+    norm += outputData[i] * outputData[i];
+  }
+  norm = sqrtf(norm);
+
+  embedding.resize(embeddingSize);
+  if (norm > 1e-6f) {
+    for (int i = 0; i < embeddingSize; i++) {
+      embedding[i] = static_cast<double>(outputData[i] / norm);
+    }
+  } else {
+    // Degenerate case: zero-norm embedding, just copy as-is
+    for (int i = 0; i < embeddingSize; i++) {
+      embedding[i] = static_cast<double>(outputData[i]);
+    }
+  }
+
+  return true;
+}
+
+bool VisionAuthImpl::runAntiSpoofing(const uint8_t *rgbData, int width, int height,
+                                     int bytesPerRow, int srcChannels, int cropX, int cropY,
+                                     int cropW, int cropH, float &livenessScore) {
+  if (!_antiSpoofingInterpreter) return false;
+
+  const int targetW = 80;
+  const int targetH = 80;
+
+  // Reallocate resize buffer if necessary
+  static std::vector<float> resizeBuffer;
+  if (resizeBuffer.size() < targetW * targetH * 3) {
+    resizeBuffer.resize(targetW * targetH * 3);
+  }
+
+  // MiniFASNet typically takes raw inputs or normalized depending on training. 
+  // We use normMode=0 to pass raw [0, 255] float values as used in inference_tflite.py
+  resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
+                 cropW, cropH, resizeBuffer.data(), targetW, targetH, 3, 0);
+
+  TfLiteTensor *inputTensor = TfLiteInterpreterGetInputTensor(_antiSpoofingInterpreter, 0);
+  float *inputData = (float *)TfLiteTensorData(inputTensor);
+  // MiniFASNet float32 input
+  memcpy(inputData, resizeBuffer.data(), targetW * targetH * 3 * sizeof(float));
+
+  if (TfLiteInterpreterInvoke(_antiSpoofingInterpreter) != kTfLiteOk) {
+    LOGE("Failed to invoke anti-spoofing model");
+    return false;
+  }
+
+  const TfLiteTensor *outputTensor = TfLiteInterpreterGetOutputTensor(_antiSpoofingInterpreter, 0);
+  if (!outputTensor) return false;
+
+  // Output is [1, 3] probabilities. Index 1 is Real Face.
+  float *outputData = (float *)TfLiteTensorData(outputTensor);
+  livenessScore = outputData[1];
+
+  LOGI("Anti-Spoofing Score: %.3f (Fake0: %.3f, Fake2: %.3f)", livenessScore, outputData[0], outputData[2]);
+  
   return true;
 }
 
@@ -580,21 +627,41 @@ VisionAuthImpl::analyzeFrame(const std::shared_ptr<ArrayBuffer> &pixelData,
     }
 
     result.eyesClosed = blinkDetected;
+    if (blinkDetected) {
+      // Step 2: Silent Anti-Spoofing Check
+      // MiniFASNet '4.0' model requires a crop scale of 4.0x around the face center
+      float scale = 4.0f;
+      float center_x = cropX + cropW / 2.0f;
+      float center_y = cropY + cropH / 2.0f;
+      float size = std::max((float)cropW, (float)cropH) * scale;
+      
+      int spoofCropX = static_cast<int>(center_x - size / 2.0f);
+      int spoofCropY = static_cast<int>(center_y - size / 2.0f);
+      int spoofCropW = static_cast<int>(size);
+      int spoofCropH = static_cast<int>(size);
+
+      float livenessScore = 0.0f;
+      bool spoofOk = runAntiSpoofing(data, w, h, uprightBpr, srcChannels,
+                                     spoofCropX, spoofCropY, spoofCropW, spoofCropH, livenessScore);
+      if (spoofOk) {
+        result.livenessScore = livenessScore;
+      }
+    }
   } else {
     LOGE("Face Landmarker failed to run or found no landmarks");
   }
 
-  // 3. Facial Recognition (GhostFace)
-  static int ghostFaceCounter = 0;
-  bool runGhostFaceModel =
-      (!eyesCurrentlyClosed) && (ghostFaceCounter++ % 5 == 0);
+  // 3. Facial Recognition (Student QAT INT8)
+  static int faceRecognitionCounter = 0;
+  bool runRecognition =
+      (!eyesCurrentlyClosed) && (faceRecognitionCounter++ % 5 == 0);
 
   std::vector<double> embedding;
   bool embeddingOk = false;
 
-  if (runGhostFaceModel) {
-    embeddingOk = runGhostFace(data, w, h, uprightBpr, srcChannels, cropX,
-                               cropY, cropW, cropH, embedding);
+  if (runRecognition) {
+    embeddingOk = runFaceRecognition(data, w, h, uprightBpr, srcChannels,
+                                     cropX, cropY, cropW, cropH, embedding);
   }
 
   if (embeddingOk) {
