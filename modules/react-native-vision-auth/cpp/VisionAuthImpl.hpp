@@ -63,7 +63,7 @@ private:
   void resizeBilinear(const uint8_t *src, int srcW, int srcH, int bytesPerRow,
                       int srcChannels, int cropX, int cropY, int cropW,
                       int cropH, float *dst, int dstW, int dstH,
-                      int dstChannels, int normMode = 1);
+                      int dstChannels, int normMode = 1, bool bgr = false);
 
 public:
   VisionAuthImpl();
