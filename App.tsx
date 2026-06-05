@@ -227,7 +227,7 @@ function CameraScreen({
   const [modelsReady, setModelsReady] = React.useState(false);
   const capturedRef = useRef(false);
   const latestEmbeddingRef = useRef<number[] | null>(null);
-
+  const spoofCooldownRef = useRef<number>(0);
   const [livenessStatus, setLivenessStatus] = React.useState(
     'Position your face and blink',
   );
@@ -302,7 +302,8 @@ function CameraScreen({
         } else if (result.eyesClosed) {
           if (!capturedRef.current) {
             if (result.livenessScore !== undefined && result.livenessScore < 0.90) {
-              setLivenessStatus('Spoof Detected! Please try again.');
+              spoofCooldownRef.current = Date.now() + 2000;
+              setLivenessStatus(`Spoof Detected! Score: ${(result.livenessScore * 100).toFixed(0)}%`);
             } else if (latestEmbeddingRef.current) {
               capturedRef.current = true;
               setLivenessStatus('Liveness Confirmed: Real Face!');
@@ -317,7 +318,7 @@ function CameraScreen({
             }
           }
         } else {
-          if (!capturedRef.current) {
+          if (!capturedRef.current && Date.now() > spoofCooldownRef.current) {
             setLivenessStatus('Please blink to verify liveness');
           }
         }

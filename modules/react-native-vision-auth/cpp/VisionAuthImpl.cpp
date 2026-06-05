@@ -38,15 +38,20 @@ void VisionAuthImpl::resizeBilinear(const uint8_t *src, int srcW, int srcH,
                                     int normMode) {
   for (int y = 0; y < dstH; y++) {
     float srcYf = cropY + (y + 0.5f) * cropH / dstH - 0.5f;
-    int y0 = std::max(0, std::min((int)srcYf, srcH - 1));
-    int y1 = std::max(0, std::min(y0 + 1, srcH - 1));
-    float yFrac = srcYf - y0;
+    float clampedYf = std::max(0.0f, std::min(srcYf, (float)(srcH - 1)));
+    int y0 = (int)clampedYf;
+    int y1 = std::min(y0 + 1, srcH - 1);
+    float yFrac = clampedYf - y0;
     
     int y0_offset = y0 * bytesPerRow;
     int y1_offset = y1 * bytesPerRow;
 
     for (int x = 0; x < dstW; x++) {
       float srcXf = cropX + (x + 0.5f) * cropW / dstW - 0.5f;
+      float clampedXf = std::max(0.0f, std::min(srcXf, (float)(srcW - 1)));
+      int x0 = (int)clampedXf;
+      int x1 = std::min(x0 + 1, srcW - 1);
+      float xFrac = clampedXf - x0;
       int x0 = std::max(0, std::min((int)srcXf, srcW - 1));
       int x1 = std::max(0, std::min(x0 + 1, srcW - 1));
       float xFrac = srcXf - x0;
