@@ -49,7 +49,8 @@ private:
                          int bytesPerRow, int srcChannels, int cropX, int cropY,
                          int cropW, int cropH, float &leftEAR, float &rightEAR,
                          std::vector<double> &leftEyeBoxOut,
-                         std::vector<double> &rightEyeBoxOut);
+                         std::vector<double> &rightEyeBoxOut,
+                         float &yawRatio);
 
   bool runFaceRecognition(const uint8_t *rgbData, int width, int height,
                           int bytesPerRow, int srcChannels, int cropX,
@@ -63,7 +64,7 @@ private:
   void resizeBilinear(const uint8_t *src, int srcW, int srcH, int bytesPerRow,
                       int srcChannels, int cropX, int cropY, int cropW,
                       int cropH, float *dst, int dstW, int dstH,
-                      int dstChannels, int normMode = 1);
+                      int dstChannels, int normMode = 1, bool bgr = false);
 
 public:
   VisionAuthImpl();

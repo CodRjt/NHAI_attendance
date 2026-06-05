@@ -35,7 +35,7 @@ void VisionAuthImpl::resizeBilinear(const uint8_t *src, int srcW, int srcH,
                                     int bytesPerRow, int srcChannels, int cropX,
                                     int cropY, int cropW, int cropH, float *dst,
                                     int dstW, int dstH, int dstChannels,
-                                    int normMode) {
+                                    int normMode, bool bgr) {
   for (int y = 0; y < dstH; y++) {
     float srcYf = cropY + (y + 0.5f) * cropH / dstH - 0.5f;
     float clampedYf = std::max(0.0f, std::min(srcYf, (float)(srcH - 1)));
@@ -52,15 +52,15 @@ void VisionAuthImpl::resizeBilinear(const uint8_t *src, int srcW, int srcH,
       int x0 = (int)clampedXf;
       int x1 = std::min(x0 + 1, srcW - 1);
       float xFrac = clampedXf - x0;
-      int x0 = std::max(0, std::min((int)srcXf, srcW - 1));
-      int x1 = std::max(0, std::min(x0 + 1, srcW - 1));
-      float xFrac = srcXf - x0;
       
       int x0_offset = x0 * srcChannels;
       int x1_offset = x1 * srcChannels;
 
       for (int c = 0; c < dstChannels; c++) {
         int srcC = std::min(c, srcChannels - 1);
+        if (bgr && c < 3) {
+            srcC = 2 - c; 
+        }
         float v00 = src[y0_offset + x0_offset + srcC];
         float v01 = src[y0_offset + x1_offset + srcC];
         float v10 = src[y1_offset + x0_offset + srcC];
@@ -286,7 +286,8 @@ bool VisionAuthImpl::runFaceLandmarker(const uint8_t *rgbData, int width,
                                        int cropW, int cropH, float &leftEAR,
                                        float &rightEAR,
                                        std::vector<double> &leftEyeBoxOut,
-                                       std::vector<double> &rightEyeBoxOut) {
+                                       std::vector<double> &rightEyeBoxOut,
+                                       float &yawRatio) {
   TfLiteTensor *inputTensor =
       TfLiteInterpreterGetInputTensor(_faceLandmarkerInterpreter, 0);
   int INPUT_W = TfLiteTensorDim(inputTensor, 2);
@@ -347,6 +348,12 @@ bool VisionAuthImpl::runFaceLandmarker(const uint8_t *rgbData, int width,
 
   getEyeBox(leftEyeIdx, leftEyeBoxOut);
   getEyeBox(rightEyeIdx, rightEyeBoxOut);
+  float noseX = landmarks[1 * 3 + 0];
+  float leftX = landmarks[234 * 3 + 0];
+  float rightX = landmarks[454 * 3 + 0];
+  
+  // Calculate horizontal ratio
+  yawRatio = (noseX - leftX) / (rightX - leftX + 1e-6f);
 
   return true;
 }
@@ -418,7 +425,7 @@ bool VisionAuthImpl::runAntiSpoofing(const uint8_t *rgbData, int width, int heig
   // MiniFASNet typically takes raw inputs or normalized depending on training. 
   // We use normMode=0 to pass raw [0, 255] float values as used in inference_tflite.py
   resizeBilinear(rgbData, width, height, bytesPerRow, srcChannels, cropX, cropY,
-                 cropW, cropH, resizeBuffer.data(), targetW, targetH, 3, 0);
+                 cropW, cropH, resizeBuffer.data(), targetW, targetH, 3, 0, true);
 
   TfLiteTensor *inputTensor = TfLiteInterpreterGetInputTensor(_antiSpoofingInterpreter, 0);
   float *inputData = (float *)TfLiteTensorData(inputTensor);
@@ -435,9 +442,16 @@ bool VisionAuthImpl::runAntiSpoofing(const uint8_t *rgbData, int width, int heig
 
   // Output is [1, 3] probabilities. Index 1 is Real Face.
   float *outputData = (float *)TfLiteTensorData(outputTensor);
-  livenessScore = outputData[1];
+  float maxLogit = std::max({outputData[0], outputData[1], outputData[2]});
+  float exp0 = std::exp(outputData[0] - maxLogit);
+  float exp1 = std::exp(outputData[1] - maxLogit);
+  float exp2 = std::exp(outputData[2] - maxLogit);
+  float sumExp = exp0 + exp1 + exp2;
+  
+  livenessScore = exp1 / sumExp; // Now it is safely between 0.0 and 1.0
 
   LOGI("Anti-Spoofing Score: %.3f (Fake0: %.3f, Fake2: %.3f)", livenessScore, outputData[0], outputData[2]);
+
   
   return true;
 }
@@ -543,11 +557,11 @@ VisionAuthImpl::analyzeFrame(const std::shared_ptr<ArrayBuffer> &pixelData,
   int cropH = static_cast<int>(squareSide);
 
   // 2. Liveness Detection (Blink / EAR)
-  float leftEAR = 0.0f, rightEAR = 0.0f;
+  float leftEAR = 0.0f, rightEAR = 0.0f, yawRatio = 0.5f;
   std::vector<double> leftEyeBox, rightEyeBox;
   bool landmarksOk = runFaceLandmarker(data, w, h, uprightBpr, srcChannels,
                                        cropX, cropY, cropW, cropH, leftEAR,
-                                       rightEAR, leftEyeBox, rightEyeBox);
+                                       rightEAR, leftEyeBox, rightEyeBox, yawRatio);
 
   bool eyesCurrentlyClosed = false;
   bool blinkDetected = false;
@@ -561,7 +575,7 @@ VisionAuthImpl::analyzeFrame(const std::shared_ptr<ArrayBuffer> &pixelData,
     result.baseline = _earOpenBaseline;
     result.leftEyeBox = leftEyeBox;
     result.rightEyeBox = rightEyeBox;
-
+    result.yawRatio = yawRatio;
     if (std::isfinite(leftEAR) && std::isfinite(rightEAR) && leftEAR > 0.02f &&
         leftEAR < 1.0f && rightEAR > 0.02f && rightEAR < 1.0f) {
       if (_earOpenBaseline <= 0.0f) {
@@ -575,9 +589,9 @@ VisionAuthImpl::analyzeFrame(const std::shared_ptr<ArrayBuffer> &pixelData,
       }
 
       const float leftCloseThreshold =
-          std::max(0.10f, _leftEarOpenBaseline * 0.75f);
+          std::max(0.10f, _leftEarOpenBaseline * 0.80f);
       const float rightCloseThreshold =
-          std::max(0.10f, _rightEarOpenBaseline * 0.75f);
+          std::max(0.10f, _rightEarOpenBaseline * 0.80f);
       const float leftOpenThreshold =
           std::max(leftCloseThreshold + 0.02f, _leftEarOpenBaseline * 0.85f);
       const float rightOpenThreshold =
@@ -632,18 +646,20 @@ VisionAuthImpl::analyzeFrame(const std::shared_ptr<ArrayBuffer> &pixelData,
     }
 
     result.eyesClosed = blinkDetected;
-    if (blinkDetected) {
+    bool challengeTriggered = blinkDetected || yawRatio < 0.41f || yawRatio > 0.58f;
+    
+    if (challengeTriggered) {
       // Step 2: Silent Anti-Spoofing Check
       // MiniFASNet '4.0' model requires a crop scale of 4.0x around the face center
       float scale = 4.0f;
-      float center_x = cropX + cropW / 2.0f;
-      float center_y = cropY + cropH / 2.0f;
-      float size = std::max((float)cropW, (float)cropH) * scale;
+      float orig_center_x = faceX + faceW / 2.0f;
+      float orig_center_y = faceY + faceH / 2.0f;
+      float orig_size = std::max(faceW, faceH) * scale;
       
-      int spoofCropX = static_cast<int>(center_x - size / 2.0f);
-      int spoofCropY = static_cast<int>(center_y - size / 2.0f);
-      int spoofCropW = static_cast<int>(size);
-      int spoofCropH = static_cast<int>(size);
+      int spoofCropX = static_cast<int>(orig_center_x - orig_size / 2.0f);
+      int spoofCropY = static_cast<int>(orig_center_y - orig_size / 2.0f);
+      int spoofCropW = static_cast<int>(orig_size);
+      int spoofCropH = static_cast<int>(orig_size);
 
       float livenessScore = 0.0f;
       bool spoofOk = runAntiSpoofing(data, w, h, uprightBpr, srcChannels,

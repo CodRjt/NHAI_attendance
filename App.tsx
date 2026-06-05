@@ -1,4 +1,6 @@
 import React, {useEffect, useCallback, useRef} from 'react';
+import { AppState } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import {
   StyleSheet,
   Text,
@@ -33,7 +35,78 @@ type StoredFace = {
   label: string;
   embedding: number[];
 };
+const SYNC_QUEUE_KEY = 'attendance_sync_queue';
 
+export type AttendanceRecord = {
+  id: string; // Unique ID for AWS idempotency
+  label: string; // The recognized user
+  timestamp: number;
+  similarity: number;
+  status: 'pending' | 'syncing';
+};
+
+// Quick hackathon-friendly UUID generator
+const generateId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
+
+function getSyncQueue(): AttendanceRecord[] {
+  const raw = storage.getString(SYNC_QUEUE_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+const AWS_API_URL = 'https://webhook.site/a037467e-8437-4b21-9f91-b671e43c2919'; // Placeholder for Part 3
+
+export async function triggerSync(onQueueUpdated?: () => void) {
+  const rawQueue = storage.getString(SYNC_QUEUE_KEY);
+  if (!rawQueue) return;
+
+  let queue: AttendanceRecord[] = JSON.parse(rawQueue);
+  const pendingRecords = queue.filter(r => r.status === 'pending');
+
+  if (pendingRecords.length === 0) return;
+
+  console.log(`Attempting to sync ${pendingRecords.length} records...`);
+  let queueChanged = false;
+
+  for (const record of pendingRecords) {
+    try {
+      // 1. Mark as syncing (prevents race conditions)
+      record.status = 'syncing';
+      storage.set(SYNC_QUEUE_KEY, JSON.stringify(queue));
+      
+      // 2. Send to AWS
+      const response = await fetch(AWS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record),
+      });
+
+      if (response.ok) {
+        // 3. PURGE: It successfully saved to AWS, delete local copy safely
+        queue = queue.filter(r => r.id !== record.id);
+        storage.set(SYNC_QUEUE_KEY, JSON.stringify(queue));
+        queueChanged = true;
+        console.log(`✅ Synced & purged: ${record.id}`);
+      } else {
+        // Server error (e.g. 500). Revert to pending.
+        record.status = 'pending';
+        storage.set(SYNC_QUEUE_KEY, JSON.stringify(queue));
+        queueChanged = true;
+      }
+    } catch (error) {
+      // Network dropped mid-sync! Revert to pending and abort the loop.
+      record.status = 'pending';
+      storage.set(SYNC_QUEUE_KEY, JSON.stringify(queue));
+      queueChanged = true;
+      console.warn('❌ Network dropped during sync. Aborting until reconnected.');
+      break; 
+    }
+  }
+
+  // Update the UI Red Badge if records were purged
+  if (queueChanged && onQueueUpdated) {
+    onQueueUpdated();
+  }
+}
+type LivenessChallenge = 'blink' | 'turn_left' | 'turn_right';
 type AppMode = 'menu' | 'store' | 'match';
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -66,13 +139,22 @@ function saveStoredFaces(faces: StoredFace[]) {
 function HomeMenu({
   onSelect,
   storedCount,
+  pendingSyncCount,
 }: {
   onSelect: (mode: AppMode) => void;
   storedCount: number;
+  pendingSyncCount: number;
 }) {
   return (
     <SafeAreaView style={menuStyles.container}>
       <StatusBar barStyle="light-content" />
+      {pendingSyncCount > 0 && (
+        <View style={{ backgroundColor: '#EF4444', padding: 10, borderRadius: 8, marginBottom: 20, alignItems: 'center' }}>
+          <Text style={{ color: '#FFF', fontWeight: 'bold' }}>
+            🔴 {pendingSyncCount} Records Offline (Waiting to Sync)
+          </Text>
+        </View>
+      )}
       <View style={menuStyles.hero}>
         <Text style={menuStyles.icon}>🔐</Text>
         <Text style={menuStyles.title}>Face Auth</Text>
@@ -217,20 +299,19 @@ function CameraScreen({
   onBack,
   onStoreDone,
   onMatchDone,
+  onQueueUpdated,
 }: {
   mode: 'store' | 'match';
   onBack: () => void;
   onStoreDone: (embedding: number[]) => void;
   onMatchDone: (embedding: number[]) => void;
+  onQueueUpdated: () => void;
 }) {
   const device = useCameraDevice('front');
   const [modelsReady, setModelsReady] = React.useState(false);
   const capturedRef = useRef(false);
   const latestEmbeddingRef = useRef<number[] | null>(null);
   const spoofCooldownRef = useRef<number>(0);
-  const [livenessStatus, setLivenessStatus] = React.useState(
-    'Position your face and blink',
-  );
 
   const [debugMetrics, setDebugMetrics] = React.useState<{
     faceBox?: number[];
@@ -239,7 +320,14 @@ function CameraScreen({
     leftEAR?: number;
     rightEAR?: number;
     baseline?: number;
+    yawRatio?: number;
   }>({});
+  const [challenge, setChallenge] = React.useState<LivenessChallenge>('blink');
+  useEffect(() => {
+    const challenges: LivenessChallenge[] = ['blink', 'turn_left', 'turn_right'];
+    setChallenge(challenges[Math.floor(Math.random() * challenges.length)]);
+  }, []);
+
 
   useEffect(() => {
     async function setup() {
@@ -279,6 +367,37 @@ function CameraScreen({
     setup();
   }, []);
 
+  useEffect(() => {
+    // Helper to refresh the UI badge
+    const refreshBadge = onQueueUpdated;
+
+    // Trigger 1: Network comes back online
+    const unsubscribeNet = NetInfo.addEventListener(state => {
+      if (state.isConnected && state.isInternetReachable) {
+        console.log('Internet Restored! Triggering Sync...');
+        triggerSync(refreshBadge);
+      }
+    });
+
+    // Trigger 2: App comes to foreground
+    const unsubscribeApp = AppState.addEventListener('change', nextAppState => {
+      if (nextAppState === 'active') {
+        console.log('App Foregrounded! Triggering Sync...');
+        triggerSync(refreshBadge);
+      }
+    });
+
+    return () => {
+      unsubscribeNet();
+      unsubscribeApp.remove();
+    };
+  }, []);
+  const getInstruction = () => {
+    if (challenge === 'blink') return 'Please blink to verify liveness';
+    if (challenge === 'turn_left') return 'Turn your head slightly LEFT';
+    return 'Turn your head slightly RIGHT';
+  };
+  const [livenessStatus, setLivenessStatus] = React.useState(getInstruction());
   const handleFrameResult = useCallback(
     (result: VisionAuthResult) => {
       try {
@@ -289,44 +408,58 @@ function CameraScreen({
           leftEAR: result.leftEAR,
           rightEAR: result.rightEAR,
           baseline: result.baseline,
+          yawRatio: result.yawRatio,
         });
 
         // Cache the latest valid embedding as it comes in
-        // (runs every 5 frames in C++)
         if (result.embeddingOk && result.embedding) {
           latestEmbeddingRef.current = Array.from(result.embedding);
         }
 
         if (!result.faceDetected) {
           setLivenessStatus('No face detected');
-        } else if (result.eyesClosed) {
-          if (!capturedRef.current) {
-            if (result.livenessScore !== undefined && result.livenessScore < 0.90) {
-              spoofCooldownRef.current = Date.now() + 2000;
-              setLivenessStatus(`Spoof Detected! Score: ${(result.livenessScore * 100).toFixed(0)}%`);
-            } else if (latestEmbeddingRef.current) {
-              capturedRef.current = true;
-              setLivenessStatus('Liveness Confirmed: Real Face!');
-              const emb = latestEmbeddingRef.current;
-              if (mode === 'store') {
-                onStoreDone(emb);
-              } else {
-                onMatchDone(emb);
+        } else if (!capturedRef.current && Date.now() > spoofCooldownRef.current) {
+          
+          // --- NEW: Evaluate the randomized challenge ---
+          let challengePassed = false;
+          
+          if (challenge === 'blink' && result.eyesClosed) {
+            challengePassed = true;
+          } else if (challenge === 'turn_left' && result.yawRatio !== undefined && result.yawRatio > 0.58) {
+            challengePassed = true; // > 0.65 is Left on mirrored camera
+          } else if (challenge === 'turn_right' && result.yawRatio !== undefined && result.yawRatio < 0.41) {
+            challengePassed = true; // < 0.35 is Right on mirrored camera
+          }
+
+          if (challengePassed) {
+            // Challenge passed! Now check Anti-Spoofing score.
+            if (result.livenessScore !== undefined) {
+              if (result.livenessScore < 0.90) {
+                spoofCooldownRef.current = Date.now() + 2000;
+                setLivenessStatus(`Spoof Detected! Score: ${(result.livenessScore * 100).toFixed(0)}%`);
+              } else if (latestEmbeddingRef.current) {
+                capturedRef.current = true;
+                setLivenessStatus('Liveness Confirmed: Real Face!');
+                const emb = latestEmbeddingRef.current;
+                if (mode === 'store') {
+                  onStoreDone(emb);
+                } else {
+                  onMatchDone(emb);
+                }
               }
             } else {
-              setLivenessStatus('Blink detected, analyzing liveness...');
+              setLivenessStatus('Analyzing liveness...');
             }
-          }
-        } else {
-          if (!capturedRef.current && Date.now() > spoofCooldownRef.current) {
-            setLivenessStatus('Please blink to verify liveness');
+          } else {
+            // Challenge not yet passed, keep showing the instruction
+            setLivenessStatus(getInstruction());
           }
         }
       } catch (e) {
         console.error('Frame parsing error', e);
       }
     },
-    [mode, onStoreDone, onMatchDone],
+    [mode, challenge, getInstruction, onStoreDone, onMatchDone],
   );
 
   const frameOutput = useFrameOutput({
@@ -454,7 +587,6 @@ function CameraScreen({
           </Text>
         </View>
       </SafeAreaView>
-
       {/* Debug HUD */}
       <View style={styles.debugHud}>
         <Text style={styles.debugText}>
@@ -466,6 +598,15 @@ function CameraScreen({
         <Text style={styles.debugText}>
           Baseline: {debugMetrics.baseline?.toFixed(3) || '0.000'}
         </Text>
+        
+        {/* ADDED: Yaw Ratio for Neck Turn Debugging */}
+        <Text style={styles.debugText}>
+          Yaw: {debugMetrics.yawRatio !== undefined ? debugMetrics.yawRatio.toFixed(3) : 'N/A'}
+          {debugMetrics.yawRatio !== undefined && (
+            debugMetrics.yawRatio > 0.58 ? 'Left' : 
+            debugMetrics.yawRatio < 0.42 ? 'Right' : ' Center'
+          )}
+        </Text>
       </View>
     </View>
   );
@@ -476,6 +617,7 @@ function AppContent() {
   const {hasPermission, requestPermission} = useCameraPermission();
   const [mode, setMode] = React.useState<AppMode>('menu');
   const [storedCount, setStoredCount] = React.useState(0);
+  const [pendingSyncCount, setPendingSyncCount] = React.useState(getSyncQueue().length);
   const [pendingEmbedding, setPendingEmbedding] = React.useState<
     number[] | null
   >(null);
@@ -494,12 +636,12 @@ function AppContent() {
       requestPermission();
     }
   }, [hasPermission, requestPermission]);
-
   const goToMenu = useCallback(() => {
     setMode('menu');
     setPendingEmbedding(null);
     setMatchResult(null);
     setStoredCount(getStoredFaces().length);
+    setPendingSyncCount(getSyncQueue().length); // Refresh queue count
   }, []);
 
   // Store face flow
@@ -543,8 +685,22 @@ function AppContent() {
       }
     }
 
-    if (bestSim >= MATCH_THRESHOLD) {
+    if (bestSim >= MATCH_THRESHOLD && bestLabel) {
       setMatchResult({label: bestLabel, similarity: bestSim});
+      
+      const queue = getSyncQueue();
+      const newRecord: AttendanceRecord = {
+        id: generateId(),
+        label: bestLabel,
+        timestamp: Date.now(),
+        similarity: bestSim,
+        status: 'pending',
+      };
+      queue.push(newRecord);
+      storage.set(SYNC_QUEUE_KEY, JSON.stringify(queue));
+      console.log('Attendance logged locally. Offline queue size:', queue.length);
+      triggerSync(() => setPendingSyncCount(getSyncQueue().length));
+      
     } else {
       setMatchResult({label: null, similarity: bestSim});
     }
@@ -560,7 +716,7 @@ function AppContent() {
   }
 
   if (mode === 'menu') {
-    return <HomeMenu onSelect={setMode} storedCount={storedCount} />;
+    return <HomeMenu onSelect={setMode} storedCount={storedCount} pendingSyncCount={pendingSyncCount}/>;
   }
 
   return (
@@ -570,6 +726,9 @@ function AppContent() {
         onBack={goToMenu}
         onStoreDone={handleStoreDone}
         onMatchDone={handleMatchDone}
+        onQueueUpdated={() =>
+        setPendingSyncCount(getSyncQueue().length)
+      }
       />
 
       {/* Label input overlay (store mode) */}

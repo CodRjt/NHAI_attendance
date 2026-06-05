@@ -14,6 +14,7 @@ export interface VisionAuthResult {
   livenessScore?: number;
   embeddingOk?: boolean;
   embedding?: number[];
+  yawRatio?: number;
 }
 
 export interface VisionAuth extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
