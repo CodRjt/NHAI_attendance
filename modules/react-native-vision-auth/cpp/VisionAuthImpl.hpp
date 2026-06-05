@@ -49,7 +49,8 @@ private:
                          int bytesPerRow, int srcChannels, int cropX, int cropY,
                          int cropW, int cropH, float &leftEAR, float &rightEAR,
                          std::vector<double> &leftEyeBoxOut,
-                         std::vector<double> &rightEyeBoxOut);
+                         std::vector<double> &rightEyeBoxOut,
+                         float &yawRatio);
 
   bool runFaceRecognition(const uint8_t *rgbData, int width, int height,
                           int bytesPerRow, int srcChannels, int cropX,
